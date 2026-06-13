@@ -12,6 +12,7 @@ export default function BridgeLauncher() {
   const [logConnected, setLogConnected] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+  const [pythonPath, setPythonPath] = useState<string>("");
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logSourceRef = useRef<EventSource | null>(null);
 
@@ -139,7 +140,7 @@ export default function BridgeLauncher() {
       const res = await fetch("/api/bridge/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ pythonPath: pythonPath || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -267,6 +268,16 @@ export default function BridgeLauncher() {
             <Download className="w-3.5 h-3.5" />
             DOWNLOAD
           </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={pythonPath}
+            onChange={(e) => setPythonPath(e.target.value)}
+            placeholder="Python path (optional, e.g. C:\Python313\python.exe)"
+            className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-300 font-mono placeholder-zinc-600 focus:outline-none focus:border-cyan-600"
+          />
         </div>
 
         {error && (

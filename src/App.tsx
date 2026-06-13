@@ -9,43 +9,19 @@ import {
   ChevronRight, ChevronLeft, RefreshCw, Plane, CheckCircle, Rocket
 } from "lucide-react";
 
-const DEFAULT_WAYPOINTS: Waypoint[] = [
-  { id: "LFMN-L", name: "LFMN (Nice)", latitude: 43.6653, longitude: 7.2150, elevationFeet: 12, type: "Airport", distanceToNextNm: 13.7, headingToNextDeg: 234 },
-  { id: "LFMD-L", name: "LFMD (Cannes)", latitude: 43.5413, longitude: 6.9535, elevationFeet: 13, type: "Airport", distanceToNextNm: 26.4, headingToNextDeg: 241 },
-  { id: "LFMC-L", name: "LFMC (Le Luc)", latitude: 43.3831, longitude: 6.3853, elevationFeet: 260, type: "Airport", distanceToNextNm: 20.3, headingToNextDeg: 228 },
-  { id: "LFTH-L", name: "LFTH (Toulon)", latitude: 43.0972, longitude: 6.1461, elevationFeet: 8, type: "Airport" },
-];
+const DEFAULT_WAYPOINTS: Waypoint[] = [];
 
 export default function App() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>(DEFAULT_WAYPOINTS);
   const [activeWaypointIdx, setActiveWaypointIdx] = useState<number>(0);
-  const [telemetry, setTelemetry] = useState<Telemetry | null>({
-    latitude: 43.6653,
-    longitude: 7.2150,
-    altitude: 3500,
-    heading: 240,
-    airspeed: 120,
-    verticalSpeed: 0,
-    pitch: 1.5,
-    bank: 0,
-    groundSpeed: 121,
-    isConnected: true,
-    aircraftType: "Cessna 172 Skyhawk",
-    timestamp: Date.now(),
-    onGround: false,
-    flaps: 0,
-    gear: "Up",
-    windSpeed: 8,
-    windDir: 360,
-    fuelPercent: 88,
-  });
+  const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const [activeTab, setActiveTab] = useState<"hud" | "plan" | "bridge" | "launcher">("hud");
   
   // Map and viewport settings
   const [mapStyle, setMapStyle] = useState<MapStyle>("dark");
   const [mapLock, setMapLock] = useState<boolean>(true); // Holds camera follow on plane
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
-  const [mockActive, setMockActive] = useState<boolean>(true);
+  const [mockActive, setMockActive] = useState<boolean>(false);
   const [localPcIp, setLocalPcIpState] = useState<string>(() => {
     return localStorage.getItem("msfs_local_pc_ip") || "127.0.0.1";
   });
@@ -68,8 +44,8 @@ export default function App() {
 
   // Simulation state variables if using Mock Tracker
   const mockStateRef = useRef({
-    lat: 43.6653, // Start near Nice (LFMN)
-    lng: 7.2150,
+    lat: 39.5, // Default Nevada area (near Reno)
+    lng: -119.8,
     heading: 240,
     altitude: 3500,
     airspeed: 120,
@@ -119,6 +95,19 @@ export default function App() {
     return { distance: distanceNm, bearing: bearingDeg };
   };
 
+  const areWaypointsEqual = (a: Waypoint[], b: Waypoint[]) => {
+    if (a.length !== b.length) return false;
+    return a.every((wp, idx) => {
+      const other = b[idx];
+      return (
+        wp.name === other.name &&
+        wp.latitude === other.latitude &&
+        wp.longitude === other.longitude &&
+        wp.elevationFeet === other.elevationFeet
+      );
+    });
+  };
+
   const { distance: distanceToActive, bearing: bearingToActive } = getDistanceAndBearingToActive();
 
   // 1. Establish robust HTTP polling telemetry link (1-second intervals)
@@ -137,9 +126,7 @@ export default function App() {
             if (current.length === 0) {
               return data.waypoints;
             }
-            const currentNames = current.map((w) => w.name).join("-");
-            const incomingNames = data.waypoints.map((w: any) => w.name).join("-");
-            if (currentNames !== incomingNames) {
+            if (!areWaypointsEqual(current, data.waypoints)) {
               return data.waypoints;
             }
             return current;
@@ -213,10 +200,10 @@ export default function App() {
     // Pre-load default flight plan if none loaded to make testing instant
     if (waypoints.length === 0) {
       const sampleWaypoints: Waypoint[] = [
-        { id: "LFMN-L", name: "LFMN (Nice)", latitude: 43.6653, longitude: 7.2150, elevationFeet: 12, type: "Airport" },
-        { id: "LFMD-L", name: "LFMD (Cannes)", latitude: 43.5413, longitude: 6.9535, elevationFeet: 13, type: "Airport" },
-        { id: "LFMC-L", name: "LFMC (Le Luc)", latitude: 43.3831, longitude: 6.3853, elevationFeet: 260, type: "Airport" },
-        { id: "LFTH-L", name: "LFTH (Toulon)", latitude: 43.0972, longitude: 6.1461, elevationFeet: 8, type: "Airport" },
+        { id: "KRNO-L", name: "KRNO (Reno)", latitude: 39.4991, longitude: -119.7681, elevationFeet: 4415, type: "Airport" },
+        { id: "KLOL-L", name: "KLOL (Lovelock)", latitude: 40.0983, longitude: -118.5689, elevationFeet: 3960, type: "Airport" },
+        { id: "KWMC-L", name: "KWMC (Winnemucca)", latitude: 40.7007, longitude: -117.7917, elevationFeet: 4308, type: "Airport" },
+        { id: "KEKO-L", name: "KEKO (Elko)", latitude: 40.8249, longitude: -115.7917, elevationFeet: 5140, type: "Airport" },
       ];
       // compute leg distances
       for (let i = 0; i < sampleWaypoints.length - 1; i++) {
@@ -234,11 +221,10 @@ export default function App() {
       setWaypoints(sampleWaypoints);
       setActiveWaypointIdx(0);
 
-      // position plane initially at LFMN Nice
-      mockStateRef.current.lat = 43.6653;
-      mockStateRef.current.lng = 7.2150;
-      mockStateRef.current.altitude = 3500;
-      mockStateRef.current.heading = 240;
+      // position plane initially at KRNO Reno
+      mockStateRef.current.lat = 39.4991;
+      mockStateRef.current.lng = -119.7681;
+      mockStateRef.current.altitude = 4415;
     }
 
     const interval = setInterval(() => {
@@ -395,7 +381,7 @@ export default function App() {
     const map = L.map(mapDivRef.current, {
       zoomControl: false,
       attributionControl: false,
-    }).setView([43.6584, 7.1827], 10);
+    }).setView([39.5, -119.8], 10);
 
     // Zoom buttons in the bottom right corner (large enough for Quest controllers)
     L.control.zoom({ position: "bottomright" }).addTo(map);
@@ -503,19 +489,7 @@ export default function App() {
     }).addTo(map);
     routePolylineRef.current = routePoly;
 
-    // Highlight active tracking leg in amber
-    if (waypoints.length > 1 && telemetry && activeWaypointIdx < waypoints.length) {
-      const activeLegLatlngs = [
-        [telemetry.latitude, telemetry.longitude],
-        [waypoints[activeWaypointIdx].latitude, waypoints[activeWaypointIdx].longitude]
-      ];
-      const activeLegPoly = L.polyline(activeLegLatlngs, {
-        color: "#f59e0b", // Amber 500
-        weight: 4,
-        opacity: 0.9,
-      }).addTo(map);
-      activeLegPolylineRef.current = activeLegPoly;
-    }
+    // Active tracking leg is drawn in the plane marker effect below
 
     // Add airport/waypoint custom markers onto Leaflet map
     waypoints.forEach((wp, idx) => {
@@ -572,12 +546,11 @@ export default function App() {
 
     const { latitude, longitude, heading, airspeed } = telemetry;
 
-    // Aircraft Marker Custom rotating SVG icon
-    // Aircraft symbol matches heading direction seamlessly
+    // Aircraft Marker - clean triangle pointing in heading direction
     const planeHtml = `
-      <div class="plane-marker" style="transform: rotate(${heading}deg); width: 34px; height: 34px;">
-        <svg viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full drop-shadow-[0_2px_8px_rgba(234,179,8,0.7)]">
-          <path d="M256 0c-4.4 0-8 3.6-8 8v160L96 242.7V200c0-6.6-5.4-12-12-12H64c-6.6 0-12 5.4-12 12v104.4l-41.4 12.4c-6.1 1.8-10.6 7.4-10.6 13.8v22.2c0-8.8 7.2-16 16-16h48l144-43.1V448l-40 24c-6.6 4-10 11.2-10 18.5V504c0 4.4 3.6 8 8 8h112c4.4 0 8-3.6 8-8v-13.5c0-7.3-3.4-14.5-10-18.5l-40-24V349.7L396 392.8h48c8.8 0 16 7.2 16 16v-22.2c0-6.4-4.5-12-10.6-13.8L408 304.4V200c0-6.6-5.4-12-12-12h-20c-6.6 0-12 5.4-12 12v42.7L264 168V8c0-4.4-3.6-8-8-8z" fill="#f59e0b" stroke="#ffffff" stroke-width="15" stroke-linejoin="round"/>
+      <div class="plane-marker" style="transform: rotate(${heading}deg); width: 28px; height: 28px;">
+        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;overflow:visible;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">
+          <polygon points="50,5 85,95 50,70 15,95" fill="#f59e0b" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
         </svg>
       </div>
     `;
@@ -585,8 +558,8 @@ export default function App() {
     const planeIcon = L.divIcon({
       html: planeHtml,
       className: "aircraft-marker-container",
-      iconSize: [34, 34],
-      iconAnchor: [17, 17],
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
     });
 
     if (planeMarkerRef.current && map.hasLayer(planeMarkerRef.current)) {
@@ -607,23 +580,29 @@ export default function App() {
       map.setView([latitude, longitude], map.getZoom(), { animate: true, duration: 0.6 });
     }
 
-    // Adjust Active navigation line if waypoints loaded
-    if (waypoints.length > 1 && activeWaypointIdx < waypoints.length) {
-      if (activeLegPolylineRef.current) {
-        activeLegPolylineRef.current.setLatLngs([
-          [latitude, longitude],
-          [waypoints[activeWaypointIdx].latitude, waypoints[activeWaypointIdx].longitude]
-        ]);
+    // Draw / update active navigation leg (amber line from plane to active waypoint)
+    if (waypoints.length > 0 && activeWaypointIdx < waypoints.length) {
+      const activeLegLatlngs = [
+        [latitude, longitude],
+        [waypoints[activeWaypointIdx].latitude, waypoints[activeWaypointIdx].longitude]
+      ];
+      if (activeLegPolylineRef.current && map.hasLayer(activeLegPolylineRef.current)) {
+        activeLegPolylineRef.current.setLatLngs(activeLegLatlngs);
       } else {
-        const activeLegPoly = L.polyline([
-          [latitude, longitude],
-          [waypoints[activeWaypointIdx].latitude, waypoints[activeWaypointIdx].longitude]
-        ], {
+        if (activeLegPolylineRef.current) {
+          try { map.removeLayer(activeLegPolylineRef.current); } catch(e) {}
+        }
+        activeLegPolylineRef.current = L.polyline(activeLegLatlngs, {
           color: "#f59e0b",
           weight: 4,
           opacity: 0.9,
         }).addTo(map);
-        activeLegPolylineRef.current = activeLegPoly;
+      }
+    } else {
+      // Remove active leg line if no waypoints
+      if (activeLegPolylineRef.current) {
+        try { map.removeLayer(activeLegPolylineRef.current); } catch(e) {}
+        activeLegPolylineRef.current = null;
       }
     }
 

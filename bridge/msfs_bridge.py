@@ -120,59 +120,136 @@ def clean_data(obj):
         return tuple(clean_data(v) for v in obj)
     return obj
 
-def locate_active_flight_plan():
+def haversine_nm(lat1, lon1, lat2, lon2):
+    """Returns the great-circle distance in nautical miles."""
+    lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    a = math.sin(dlat / 2.0) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2.0) ** 2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return 3440.065 * c
+
+
+def locate_active_flight_plan(current_lat=None, current_lon=None):
     """Locates and parses the active flight plan automatically from MSFS AppData directories."""
     local_appdata = os.environ.get("LOCALAPPDATA", "")
     appdata = os.environ.get("APPDATA", "")
-    
-    paths = [
-        # MS Store / Xbox App Version
-        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState", "MISSIONS", "Custom", "CustomFlight", "CustomFlight.pln"),
-        # Steam Version
-        os.path.join(appdata, "Microsoft Flight Simulator", "MISSIONS", "Custom", "CustomFlight", "CustomFlight.pln")
+
+    candidates = []
+    search_roots = [
+        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState", "MISSIONS", "Custom", "CustomFlight"),
+        os.path.join(appdata, "Microsoft Flight Simulator", "MISSIONS", "Custom", "CustomFlight"),
+        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState", "MISSIONS"),
+        os.path.join(appdata, "Microsoft Flight Simulator", "MISSIONS"),
+        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState", "FlightPlans"),
+        os.path.join(appdata, "Microsoft Flight Simulator", "FlightPlans"),
+        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState", "SavedFlights"),
+        os.path.join(appdata, "Microsoft Flight Simulator", "SavedFlights"),
+        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState"),
+        os.path.join(appdata, "Microsoft Flight Simulator"),
+        # Bush trip locations (Packages\Official\Steam\asobo-bushtrip-*)
+        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState", "Packages", "Official", "Steam"),
+        os.path.join(appdata, "Microsoft Flight Simulator", "Packages", "Official", "Steam"),
     ]
-    
-    for path in paths:
-        if os.path.exists(path):
-            try:
-                tree = ET.parse(path)
-                root = tree.getroot()
-                waypoints = []
-                
-                # Fetch ATCWaypoint elements
-                atc_wps = root.findall(".//ATCWaypoint")
-                for idx, wp in enumerate(atc_wps):
-                    wp_id = wp.attrib.get("id", f"WP{idx}")
-                    
-                    icao_node = wp.find("ICAOIdent")
-                    icao = icao_node.text if icao_node is not None else ""
-                    
-                    type_node = wp.find("ATCWaypointType")
-                    wp_type = type_node.text if type_node is not None else "User"
-                    
-                    pos_node = wp.find("WorldPosition")
-                    if pos_node is not None and pos_node.text:
-                        parts = [p.strip() for p in pos_node.text.split(",")]
-                        if len(parts) >= 2:
-                            lat = parse_dms(parts[0])
-                            lon = parse_dms(parts[1])
-                            ele = float(parts[2].replace("+", "")) if len(parts) > 2 else 0.0
-                            
-                            waypoints.append({
-                                "id": f"sim-{wp_id}-{idx}",
-                                "name": icao if icao else wp_id,
-                                "latitude": lat,
-                                "longitude": lon,
-                                "elevationFeet": int(ele),
-                                "type": wp_type,
-                                "icao": icao
-                            })
-                if waypoints:
-                    print(f"-> Detected active MSFS flight plan: {len(waypoints)} waypoints loaded.")
-                    return waypoints
-            except Exception as e:
-                print(f"Error parsing flight plan: {e}")
-    return None
+
+    for root in search_roots:
+        if os.path.isfile(root) and root.lower().endswith(".pln"):
+            candidates.append(root)
+        elif os.path.isdir(root):
+            for dirpath, _, files in os.walk(root):
+                for filename in files:
+                    if filename.lower().endswith(".pln"):
+                        candidates.append(os.path.join(dirpath, filename))
+
+    candidates = list(dict.fromkeys(candidates))
+
+    parsed_candidates = []
+
+    for path in candidates:
+        try:
+            tree = ET.parse(path)
+            root = tree.getroot()
+            waypoints = []
+
+            atc_wps = root.findall(".//ATCWaypoint")
+            for idx, wp in enumerate(atc_wps):
+                wp_id = wp.attrib.get("id", f"WP{idx}")
+
+                icao_node = wp.find("ICAOIdent")
+                icao = icao_node.text if icao_node is not None else ""
+
+                type_node = wp.find("ATCWaypointType")
+                wp_type = type_node.text if type_node is not None else "User"
+
+                pos_node = wp.find("WorldPosition")
+                if pos_node is not None and pos_node.text:
+                    parts = [p.strip() for p in pos_node.text.split(",")]
+                    if len(parts) >= 2:
+                        lat = parse_dms(parts[0])
+                        lon = parse_dms(parts[1])
+                        ele = float(parts[2].replace("+", "")) if len(parts) > 2 else 0.0
+
+                        waypoints.append({
+                            "id": f"sim-{wp_id}-{idx}",
+                            "name": icao if icao else wp_id,
+                            "latitude": lat,
+                            "longitude": lon,
+                            "elevationFeet": int(ele),
+                            "type": wp_type,
+                            "icao": icao,
+                        })
+
+            if waypoints:
+                mtime = os.path.getmtime(path)
+                closest_distance_nm = float("inf")
+                if current_lat is not None and current_lon is not None:
+                    closest_distance_nm = min(
+                        haversine_nm(current_lat, current_lon, wp["latitude"], wp["longitude"])
+                        for wp in waypoints
+                    )
+
+                parsed_candidates.append({
+                    "path": path,
+                    "waypoints": waypoints,
+                    "mtime": mtime,
+                    "closest_distance_nm": closest_distance_nm,
+                })
+        except Exception as e:
+            print(f"Error parsing flight plan {path}: {e}")
+
+    if not parsed_candidates:
+        return None
+
+    if current_lat is not None and current_lon is not None:
+        nearby_candidates = [c for c in parsed_candidates if c["closest_distance_nm"] <= 250.0]
+        if nearby_candidates:
+            best_candidate = min(
+                nearby_candidates,
+                key=lambda c: (c["closest_distance_nm"], -len(c["waypoints"]), -c["mtime"])
+            )
+        else:
+            best_candidate = min(
+                parsed_candidates,
+                key=lambda c: (c["closest_distance_nm"], -len(c["waypoints"]), -c["mtime"])
+            )
+    else:
+        best_candidate = max(parsed_candidates, key=lambda c: (c["mtime"], len(c["waypoints"])))
+
+    waypoint_count = len(best_candidate['waypoints'])
+    file_path = best_candidate['path']
+    closest_nm = best_candidate.get('closest_distance_nm', float('inf'))
+    print(f"-> SELECTED flight plan: {file_path}")
+    print(f"   Waypoints: {waypoint_count}, Closest distance: {closest_nm:.1f}nm")
+    return best_candidate["waypoints"]
+
+
+def should_reload_flight_plan(current_lat, current_lon, cached_waypoints, threshold_nm=500.0):
+    if not cached_waypoints or current_lat is None or current_lon is None:
+        return True
+    closest = min(
+        haversine_nm(current_lat, current_lon, wp["latitude"], wp["longitude"]) for wp in cached_waypoints
+    )
+    return closest > threshold_nm
 
 print("Connecting to MSFS 2020 via SimConnect...")
 
@@ -192,8 +269,8 @@ aq = AircraftRequests(sm)
 print("Telemetry streaming active. Transmitting aircraft position and flight path auto-sync... Press Ctrl+C to exit.")
 print("=" * 60)
 
-# Check active flight plan on startup
-cached_waypoints = locate_active_flight_plan()
+# Don't load flight plan on startup — wait until we have valid coordinates
+cached_waypoints = None
 
 try:
     while True:
@@ -237,9 +314,13 @@ try:
                 fuel_capacity = aq.get("FUEL_TOTAL_CAPACITY") or 1
                 fuel_pct = (fuel_total / fuel_capacity) * 100.0 if fuel_capacity > 0 else 100.0
 
-                # Re-verify flight plan periodically if empty
-                if not cached_waypoints:
-                    cached_waypoints = locate_active_flight_plan()
+                # Re-verify flight plan if empty or if the current aircraft is far from the cached route
+                reload_check = should_reload_flight_plan(lat, lon, cached_waypoints)
+                print(f"[DEBUG] Reload check: {reload_check}, cached waypoints: {len(cached_waypoints) if cached_waypoints else 0}", end="")
+                if reload_check:
+                    print(f" -> RELOADING!", end="")
+                    cached_waypoints = locate_active_flight_plan(lat, lon)
+                print()  # newline
 
                 payload = {
                     "latitude": lat,

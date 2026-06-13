@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import fs from "fs";
-import { spawn, ChildProcess } from "child_process";
+import { spawn, ChildProcess, execSync } from "child_process";
 
 function logToFile(msg: string) {
   try {
@@ -43,21 +43,24 @@ let bridgeLogClients: express.Response[] = [];
 
 function broadcastBridgeLog(line: string) {
   const rawText = line.toString();
-  const normalized = rawText.replace(/\r\n/g, "\n");
-  const segments = normalized.split("\n");
+  // Normalize all CR variants to LF, then split into candidate lines
+  const normalized = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const candidates = normalized.split("\n").map((s) => s.trim());
 
-  const lines = segments.flatMap((segment) => {
-    const parts = segment
-      .split("\r")
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0);
-    if (parts.length > 1) {
-      return [parts[parts.length - 1]];
-    }
-    return parts;
-  }).filter((item) => item.length > 0);
+  // Filter out short/noise lines and remove contiguous duplicates
+  const filtered: string[] = [];
+  let prev: string | null = null;
+  for (const c of candidates) {
+    if (!c || c.length <= 3) continue;
+    // Drop stray markers like '[STDOUT]' alone
+    if (/^\[STDOUT\]$/.test(c) || /^\[STDERR\]$/.test(c)) continue;
+    if (prev === c) continue;
+    filtered.push(c);
+    prev = c;
+  }
 
-  for (const rawLine of lines) {
+  for (const rawLine of filtered) {
+    // Avoid repeating the same final line already in buffer
     if (bridgeLogBuffer.length > 0 && bridgeLogBuffer[bridgeLogBuffer.length - 1] === rawLine) {
       continue;
     }
@@ -86,15 +89,59 @@ function resolveExecutableOnPath(executable: string): string | null {
     return executable;
   }
 
+  // On Windows, also try common Python install locations directly
+  // because the Windows Store stub can interfere with `where`
+  const windowsPythonPaths = [
+    "C:\\Python313\\python.exe",
+    "C:\\Python312\\python.exe",
+    "C:\\Python311\\python.exe",
+    "C:\\Python310\\python.exe",
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Python", "Python313", "python.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Python", "Python312", "python.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Python", "Python311", "python.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Python", "Python310", "python.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Python", "Launcher", "py.exe"),
+  ];
+
+  const candidates = process.platform === "win32"
+    ? [...windowsPythonPaths, executable]
+    : [executable];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      try {
+        const version = execSync(`"${candidate}" --version`, { encoding: "utf8", timeout: 5000 });
+        if (version && version.toLowerCase().includes("python")) {
+          return candidate;
+        }
+      } catch (_) {
+        // not a valid python, skip
+      }
+    }
+  }
+
+  // Fallback: try `where` / `which`
   try {
-    const { execSync } = require("child_process");
     const command = process.platform === "win32" ? "where" : "which";
     const result = execSync(`${command} ${executable}`, { encoding: "utf8", timeout: 3000 });
-    const match = result.split(/\r?\n/).find((line: string) => line.trim().length > 0);
-    return match ? match.trim() : null;
+    const lines = result.split(/\r?\n/).map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+    for (const line of lines) {
+      if (fs.existsSync(line)) {
+        try {
+          const version = execSync(`"${line}" --version`, { encoding: "utf8", timeout: 5000 });
+          if (version && version.toLowerCase().includes("python")) {
+            return line;
+          }
+        } catch (_) {
+          // skip
+        }
+      }
+    }
   } catch (e) {
-    return null;
+    // ignore
   }
+
+  return null;
 }
 
 function attachBridgeProcessListeners(proc: ChildProcess) {
@@ -229,22 +276,21 @@ async function startServer() {
   function killOrphanedBridgeProcesses() {
     if (process.platform !== "win32") return;
     try {
-      const { execSync } = require("child_process");
       const netstat = execSync("netstat -ano", { encoding: "utf8", timeout: 5000 });
       const lines = netstat.split("\n");
       const pids = new Set<string>();
       for (const line of lines) {
         if (line.includes(":5912") && line.includes("LISTENING")) {
           const parts = line.trim().split(/\s+/);
-          const pid = parts[parts.length - 1];
-          if (pid && /^\d+$/.test(pid)) pids.add(pid);
+          const p = parts[parts.length - 1];
+          if (p && /^\d+$/.test(p)) pids.add(p);
         }
       }
       const killed: string[] = [];
-      for (const pid of pids) {
+      for (const p of pids) {
         try {
-          execSync("taskkill /PID " + pid + " /T /F", { stdio: "ignore" });
-          killed.push(pid);
+          execSync("taskkill /PID " + p + " /T /F", { stdio: "ignore" });
+          killed.push(p);
         } catch (e) { /* already dead */ }
       }
       if (killed.length > 0) {
@@ -302,8 +348,9 @@ async function startServer() {
       bridgeProcess = spawn(resolvedPython, [bridgeScriptPath], {
         cwd: process.cwd(),
         env: { ...process.env, PYTHONUNBUFFERED: "1" },
-        detached: true,
+        detached: false,
         stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
       });
 
       if (!bridgeProcess || !bridgeProcess.pid) {
@@ -312,7 +359,6 @@ async function startServer() {
 
       attachBridgeProcessListeners(bridgeProcess);
       broadcastBridgeLog(`[SYSTEM] Bridge process spawned (PID: ${bridgeProcess.pid})`);
-      bridgeProcess.unref();
 
       res.json({ status: "started", pid: bridgeProcess.pid, python: resolvedPython, message: "Bridge process started." });
     } catch (e: any) {
@@ -328,7 +374,6 @@ async function startServer() {
       broadcastBridgeLog(`[SYSTEM] Stopping bridge process (PID: ${bridgeProcess.pid})...`);
       try {
         if (process.platform === "win32") {
-          const { execSync } = require("child_process");
           execSync(`taskkill /PID ${bridgeProcess.pid} /T /F`, { stdio: "ignore" });
         } else {
           bridgeProcess.kill("SIGKILL");
@@ -507,59 +552,127 @@ def clean_data(obj):
         return tuple(clean_data(v) for v in obj)
     return obj
 
-def locate_active_flight_plan():
+def haversine_nm(lat1, lon1, lat2, lon2):
+    """Returns the great-circle distance in nautical miles."""
+    lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    a = math.sin(dlat / 2.0) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2.0) ** 2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return 3440.065 * c
+
+
+def locate_active_flight_plan(current_lat=None, current_lon=None):
     """Locates and parses the active flight plan automatically from MSFS AppData directories."""
     local_appdata = os.environ.get("LOCALAPPDATA", "")
     appdata = os.environ.get("APPDATA", "")
-    
-    paths = [
-        # MS Store / Xbox App Version
-        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState", "MISSIONS", "Custom", "CustomFlight", "CustomFlight.pln"),
-        # Steam Version
-        os.path.join(appdata, "Microsoft Flight Simulator", "MISSIONS", "Custom", "CustomFlight", "CustomFlight.pln")
+
+    candidates = []
+    search_roots = [
+        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState", "MISSIONS", "Custom", "CustomFlight"),
+        os.path.join(appdata, "Microsoft Flight Simulator", "MISSIONS", "Custom", "CustomFlight"),
+        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState", "FlightPlans"),
+        os.path.join(appdata, "Microsoft Flight Simulator", "FlightPlans"),
+        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState", "SavedFlights"),
+        os.path.join(appdata, "Microsoft Flight Simulator", "SavedFlights"),
+        os.path.join(local_appdata, "Packages", "Microsoft.FlightSimulator_8wekyb3d8bbwe", "LocalState"),
+        os.path.join(appdata, "Microsoft Flight Simulator"),
     ]
-    
-    for path in paths:
-        if os.path.exists(path):
-            try:
-                tree = ET.parse(path)
-                root = tree.getroot()
-                waypoints = []
-                
-                # Fetch ATCWaypoint elements
-                atc_wps = root.findall(".//ATCWaypoint")
-                for idx, wp in enumerate(atc_wps):
-                    wp_id = wp.attrib.get("id", f"WP{idx}")
-                    
-                    icao_node = wp.find("ICAOIdent")
-                    icao = icao_node.text if icao_node is not None else ""
-                    
-                    type_node = wp.find("ATCWaypointType")
-                    wp_type = type_node.text if type_node is not None else "User"
-                    
-                    pos_node = wp.find("WorldPosition")
-                    if pos_node is not None and pos_node.text:
-                        parts = [p.strip() for p in pos_node.text.split(",")]
-                        if len(parts) >= 2:
-                            lat = parse_dms(parts[0])
-                            lon = parse_dms(parts[1])
-                            ele = float(parts[2].replace("+", "")) if len(parts) > 2 else 0.0
-                            
-                            waypoints.append({
-                                "id": f"sim-{wp_id}-{idx}",
-                                "name": icao if icao else wp_id,
-                                "latitude": lat,
-                                "longitude": lon,
-                                "elevationFeet": int(ele),
-                                "type": wp_type,
-                                "icao": icao
-                            })
-                if waypoints:
-                    print(f"-> Detected active MSFS flight plan: {len(waypoints)} waypoints loaded.")
-                    return waypoints
-            except Exception as e:
-                print(f"Error parsing flight plan: {e}")
-    return None
+
+    for root in search_roots:
+        if os.path.isfile(root) and root.lower().endswith(".pln"):
+            candidates.append(root)
+        elif os.path.isdir(root):
+            for dirpath, _, files in os.walk(root):
+                for filename in files:
+                    if filename.lower().endswith(".pln"):
+                        candidates.append(os.path.join(dirpath, filename))
+
+    candidates = list(dict.fromkeys(candidates))
+
+    parsed_candidates = []
+
+    for path in candidates:
+        try:
+            tree = ET.parse(path)
+            root = tree.getroot()
+            waypoints = []
+
+            atc_wps = root.findall(".//ATCWaypoint")
+            for idx, wp in enumerate(atc_wps):
+                wp_id = wp.attrib.get("id", f"WP{idx}")
+
+                icao_node = wp.find("ICAOIdent")
+                icao = icao_node.text if icao_node is not None else ""
+
+                type_node = wp.find("ATCWaypointType")
+                wp_type = type_node.text if type_node is not None else "User"
+
+                pos_node = wp.find("WorldPosition")
+                if pos_node is not None and pos_node.text:
+                    parts = [p.strip() for p in pos_node.text.split(",")]
+                    if len(parts) >= 2:
+                        lat = parse_dms(parts[0])
+                        lon = parse_dms(parts[1])
+                        ele = float(parts[2].replace("+", "")) if len(parts) > 2 else 0.0
+
+                        waypoints.append({
+                            "id": f"sim-{wp_id}-{idx}",
+                            "name": icao if icao else wp_id,
+                            "latitude": lat,
+                            "longitude": lon,
+                            "elevationFeet": int(ele),
+                            "type": wp_type,
+                            "icao": icao,
+                        })
+
+            if waypoints:
+                mtime = os.path.getmtime(path)
+                closest_distance_nm = float("inf")
+                if current_lat is not None and current_lon is not None:
+                    closest_distance_nm = min(
+                        haversine_nm(current_lat, current_lon, wp["latitude"], wp["longitude"])
+                        for wp in waypoints
+                    )
+
+                parsed_candidates.append({
+                    "path": path,
+                    "waypoints": waypoints,
+                    "mtime": mtime,
+                    "closest_distance_nm": closest_distance_nm,
+                })
+        except Exception as e:
+            print(f"Error parsing flight plan {path}: {e}")
+
+    if not parsed_candidates:
+        return None
+
+    if current_lat is not None and current_lon is not None:
+        nearby_candidates = [c for c in parsed_candidates if c["closest_distance_nm"] <= 250.0]
+        if nearby_candidates:
+            best_candidate = min(
+                nearby_candidates,
+                key=lambda c: (c["closest_distance_nm"], -len(c["waypoints"]), -c["mtime"])
+            )
+        else:
+            best_candidate = min(
+                parsed_candidates,
+                key=lambda c: (c["closest_distance_nm"], -len(c["waypoints"]), -c["mtime"])
+            )
+    else:
+        best_candidate = max(parsed_candidates, key=lambda c: (c["mtime"], len(c["waypoints"])))
+
+    print(f"-> Detected active MSFS flight plan from {best_candidate['path']}: {len(best_candidate['waypoints'])} waypoints loaded.")
+    return best_candidate["waypoints"]
+
+
+def should_reload_flight_plan(current_lat, current_lon, cached_waypoints, threshold_nm=180.0):
+    if not cached_waypoints or current_lat is None or current_lon is None:
+        return True
+    closest = min(
+        haversine_nm(current_lat, current_lon, wp["latitude"], wp["longitude"]) for wp in cached_waypoints
+    )
+    return closest > threshold_nm
 
 print("Connecting to MSFS 2020 via SimConnect...")
 
@@ -624,9 +737,9 @@ try:
                 fuel_capacity = aq.get("FUEL_TOTAL_CAPACITY") or 1
                 fuel_pct = (fuel_total / fuel_capacity) * 100.0 if fuel_capacity > 0 else 100.0
 
-                # Re-verify flight plan periodically if empty
-                if not cached_waypoints:
-                    cached_waypoints = locate_active_flight_plan()
+                # Re-verify flight plan when empty or when the aircraft is far from the cached route
+                if should_reload_flight_plan(lat, lon, cached_waypoints):
+                    cached_waypoints = locate_active_flight_plan(lat, lon)
 
                 payload = {
                     "latitude": lat,
@@ -749,7 +862,6 @@ except KeyboardInterrupt:
     console.log(`[SERVER] MSFS VR Flight Map Server running on http://localhost:${PORT}`);
     // Kill any existing process on port 5912
     try {
-      const { execSync } = require("child_process");
       // Get PIDs from netstat and kill them
       const netstat = execSync("netstat -ano", { encoding: "utf8", timeout: 5000 });
       const lines = netstat.split("\n");
