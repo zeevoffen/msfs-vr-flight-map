@@ -1,0 +1,31 @@
+{
+  "entities": {
+    "Telemetry": {
+      "title": "Telemetry",
+      "description": "Real-time aircraft position and flight variables from MSFS",
+      "type": "object",
+      "properties": {
+        "latitude": { "type": "number", "description": "Latitude coordinate of aircraft" },
+        "longitude": { "type": "number", "description": "Longitude coordinate of aircraft" },
+        "altitude": { "type": "number", "description": "Altitude in feet" },
+        "heading": { "type": "number", "description": "Magnetic heading of aircraft" },
+        "airspeed": { "type": "number", "description": "Indicated airspeed in knots" },
+        "verticalSpeed": { "type": "number", "description": "Vertical speed in fpm" },
+        "pitch": { "type": "number" },
+        "bank": { "type": "number" },
+        "groundSpeed": { "type": "number" },
+        "isConnected": { "type": "boolean" },
+        "aircraftType": { "type": "string" },
+        "onGround": { "type": "boolean" },
+        "timestamp": { "type": "number" }
+       },
+       "required": ["latitude", "longitude"]
+    }
+  },
+  "firestore": {
+    "telemetry/{telemetryId}": {
+      "schema": "Telemetry",
+      "description": "Active simulation telemetry documents"
+    }
+  }
+}

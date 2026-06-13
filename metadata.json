@@ -1,0 +1,6 @@
+{
+  "name": "MSFS VR Flight Map",
+  "description": "An interactive, high-fidelity flight map and live telemetry tracker for MSFS 2020, optimized for Quest 3 VR flight simming with flight plan import.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
