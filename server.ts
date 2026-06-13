@@ -42,13 +42,85 @@ const MAX_LOG_LINES = 500;
 let bridgeLogClients: express.Response[] = [];
 
 function broadcastBridgeLog(line: string) {
-  bridgeLogBuffer.push(line);
-  if (bridgeLogBuffer.length > MAX_LOG_LINES) {
-    bridgeLogBuffer.shift();
+  const rawText = line.toString();
+  const normalized = rawText.replace(/\r\n/g, "\n");
+  const segments = normalized.split("\n");
+
+  const lines = segments.flatMap((segment) => {
+    const parts = segment
+      .split("\r")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    if (parts.length > 1) {
+      return [parts[parts.length - 1]];
+    }
+    return parts;
+  }).filter((item) => item.length > 0);
+
+  for (const rawLine of lines) {
+    if (bridgeLogBuffer.length > 0 && bridgeLogBuffer[bridgeLogBuffer.length - 1] === rawLine) {
+      continue;
+    }
+
+    bridgeLogBuffer.push(rawLine);
+    if (bridgeLogBuffer.length > MAX_LOG_LINES) {
+      bridgeLogBuffer.shift();
+    }
+
+    const message = `data: ${JSON.stringify({ line: rawLine })}\n\n`;
+    bridgeLogClients.forEach((client) => {
+      try {
+        client.write(message);
+      } catch (e) {
+        // client disconnected
+      }
+    });
   }
-  const message = `data: ${JSON.stringify({ line })}\n\n`;
-  bridgeLogClients.forEach((client) => {
-    try { client.write(message); } catch (e) { /* client disconnected */ }
+}
+
+function resolveExecutableOnPath(executable: string): string | null {
+  if (!executable) {
+    return null;
+  }
+  if (path.isAbsolute(executable) || executable.includes(path.sep)) {
+    return executable;
+  }
+
+  try {
+    const { execSync } = require("child_process");
+    const command = process.platform === "win32" ? "where" : "which";
+    const result = execSync(`${command} ${executable}`, { encoding: "utf8", timeout: 3000 });
+    const match = result.split(/\r?\n/).find((line: string) => line.trim().length > 0);
+    return match ? match.trim() : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function attachBridgeProcessListeners(proc: ChildProcess) {
+  const pid = proc.pid;
+  if (!pid) return;
+
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    broadcastBridgeLog(`[STDOUT] ${chunk.toString()}`);
+  });
+
+  proc.stderr?.on("data", (chunk: Buffer) => {
+    broadcastBridgeLog(`[STDERR] ${chunk.toString()}`);
+  });
+
+  proc.on("exit", (code, signal) => {
+    broadcastBridgeLog(`[SYSTEM] Bridge process ${pid} exited with code=${code} signal=${signal}`);
+    if (bridgeProcess?.pid === pid) {
+      bridgeProcess = null;
+    }
+  });
+
+  proc.on("error", (err: Error) => {
+    broadcastBridgeLog(`[SYSTEM] Bridge process error: ${err.message}`);
+    if (bridgeProcess?.pid === pid) {
+      bridgeProcess = null;
+    }
   });
 }
 
@@ -153,10 +225,50 @@ async function startServer() {
 
   // --- Bridge Process Management ---
 
+  // Kill orphaned bridge processes from previous server instances
+  function killOrphanedBridgeProcesses() {
+    if (process.platform !== "win32") return;
+    try {
+      const { execSync } = require("child_process");
+      const netstat = execSync("netstat -ano", { encoding: "utf8", timeout: 5000 });
+      const lines = netstat.split("\n");
+      const pids = new Set<string>();
+      for (const line of lines) {
+        if (line.includes(":5912") && line.includes("LISTENING")) {
+          const parts = line.trim().split(/\s+/);
+          const pid = parts[parts.length - 1];
+          if (pid && /^\d+$/.test(pid)) pids.add(pid);
+        }
+      }
+      const killed: string[] = [];
+      for (const pid of pids) {
+        try {
+          execSync("taskkill /PID " + pid + " /T /F", { stdio: "ignore" });
+          killed.push(pid);
+        } catch (e) { /* already dead */ }
+      }
+      if (killed.length > 0) {
+        console.log("[SERVER] Killed " + killed.length + " orphaned bridge process(es) on port 5912 (PIDs: " + killed.join(", ") + ")");
+      }
+
+      // Fallback: kill any msfs_bridge.py process by command line if netstat didn't catch it.
+      try {
+        execSync(
+          "powershell -NoProfile -Command \"Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*msfs_bridge.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"",
+          { stdio: "ignore", timeout: 10000 }
+        );
+      } catch (e) {
+        // ignore fallback failures
+      }
+    } catch (e) {
+      // Ignore — no process on port 5912
+    }
+  }
+
   // Start the Python bridge script
   app.post("/api/bridge/start", (req, res) => {
     if (bridgeProcess) {
-      return res.json({ status: "already_running", message: "Bridge is already running." });
+      return res.json({ status: "already_running", message: "Bridge is already running.", pid: bridgeProcess.pid });
     }
 
     const bridgeScriptPath = path.join(process.cwd(), "bridge", "msfs_bridge.py");
@@ -164,89 +276,70 @@ async function startServer() {
       return res.status(404).json({ status: "error", message: `Bridge script not found at ${bridgeScriptPath}` });
     }
 
-    const pythonExe = req.body.pythonPath || "python.exe";
-    broadcastBridgeLog(`[SYSTEM] Starting bridge: ${pythonExe} ${bridgeScriptPath}`);
+    const requestedPython = req.body.pythonPath || "python.exe";
+    const candidates = Array.from(new Set([requestedPython, "python.exe", "py", "python"].filter(Boolean)));
+    broadcastBridgeLog(`[SYSTEM] Starting bridge, probing Python runtime: ${candidates.join(", ")}`);
 
+    killOrphanedBridgeProcesses();
+
+    let resolvedPython: string | null = null;
+    for (const candidate of candidates) {
+      const resolved = resolveExecutableOnPath(candidate);
+      if (resolved) {
+        resolvedPython = resolved;
+        break;
+      }
+    }
+
+    if (!resolvedPython) {
+      const message = "Could not resolve a Python runtime. Install Python or pass pythonPath to /api/bridge/start.";
+      broadcastBridgeLog(`[SYSTEM] ${message}`);
+      return res.status(500).json({ status: "error", message });
+    }
+
+    broadcastBridgeLog(`[SYSTEM] Using Python executable: ${resolvedPython}`);
     try {
-      // Spawn the Python bridge script
-      bridgeProcess = spawn(pythonExe, [bridgeScriptPath], {
+      bridgeProcess = spawn(resolvedPython, [bridgeScriptPath], {
         cwd: process.cwd(),
         env: { ...process.env, PYTHONUNBUFFERED: "1" },
-        detached: false,
-        windowsHide: true,
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
       });
 
-      // Log the PID so we can verify the process actually started
+      if (!bridgeProcess || !bridgeProcess.pid) {
+        throw new Error("Failed to spawn Python bridge process.");
+      }
+
+      attachBridgeProcessListeners(bridgeProcess);
       broadcastBridgeLog(`[SYSTEM] Bridge process spawned (PID: ${bridgeProcess.pid})`);
+      bridgeProcess.unref();
 
-      bridgeProcess.stdout?.on("data", (data: Buffer) => {
-        // Normalize line endings: \r\n -> \n, standalone \r -> \n
-        const text = data.toString().replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-        const lines = text.split("\n").filter((l: string) => l.trim());
-        // Send all lines from this data chunk as a single batch message
-        if (lines.length > 0) {
-          const message = `data: ${JSON.stringify({ lines })}\n\n`;
-          bridgeLogClients.forEach((client) => {
-            try { client.write(message); } catch (e) { /* client disconnected */ }
-          });
-          // Also add to buffer
-          lines.forEach((line: string) => {
-            bridgeLogBuffer.push(`[STDOUT] ${line}`);
-          });
-          if (bridgeLogBuffer.length > MAX_LOG_LINES) {
-            bridgeLogBuffer.splice(0, bridgeLogBuffer.length - MAX_LOG_LINES);
-          }
-        }
-      });
-
-      bridgeProcess.stderr?.on("data", (data: Buffer) => {
-        const text = data.toString().replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-        const lines = text.split("\n").filter((l: string) => l.trim());
-        if (lines.length > 0) {
-          const message = `data: ${JSON.stringify({ lines })}\n\n`;
-          bridgeLogClients.forEach((client) => {
-            try { client.write(message); } catch (e) { /* client disconnected */ }
-          });
-          lines.forEach((line: string) => {
-            bridgeLogBuffer.push(`[STDERR] ${line}`);
-          });
-          if (bridgeLogBuffer.length > MAX_LOG_LINES) {
-            bridgeLogBuffer.splice(0, bridgeLogBuffer.length - MAX_LOG_LINES);
-          }
-        }
-      });
-
-      bridgeProcess.on("close", (code: number | null) => {
-        broadcastBridgeLog(`[SYSTEM] Bridge process exited with code ${code}`);
-        bridgeProcess = null;
-      });
-
-      bridgeProcess.on("error", (err: Error) => {
-        broadcastBridgeLog(`[SYSTEM] Bridge process error: ${err.message}`);
-        bridgeProcess = null;
-      });
-
-      // Check if process dies within 1 second (immediate crash)
-      setTimeout(() => {
-        if (bridgeProcess === null) {
-          broadcastBridgeLog("[SYSTEM] WARNING: Bridge process exited immediately. Check Python path and dependencies.");
-        }
-      }, 1500);
-
-      res.json({ status: "started", pid: bridgeProcess.pid, message: "Bridge process started." });
+      res.json({ status: "started", pid: bridgeProcess.pid, python: resolvedPython, message: "Bridge process started." });
     } catch (e: any) {
       broadcastBridgeLog(`[SYSTEM] Failed to start bridge: ${e.message}`);
+      bridgeProcess = null;
       res.status(500).json({ status: "error", message: e.message });
     }
   });
 
   // Stop the Python bridge script
   app.post("/api/bridge/stop", (req, res) => {
-    if (!bridgeProcess) {
-      return res.json({ status: "not_running", message: "Bridge is not running." });
+    if (bridgeProcess) {
+      broadcastBridgeLog(`[SYSTEM] Stopping bridge process (PID: ${bridgeProcess.pid})...`);
+      try {
+        if (process.platform === "win32") {
+          const { execSync } = require("child_process");
+          execSync(`taskkill /PID ${bridgeProcess.pid} /T /F`, { stdio: "ignore" });
+        } else {
+          bridgeProcess.kill("SIGKILL");
+        }
+      } catch (e) {
+        /* ignore */
+      }
+      bridgeProcess = null;
     }
-    broadcastBridgeLog("[SYSTEM] Stopping bridge process...");
-    bridgeProcess.kill("SIGTERM");
+
+    killOrphanedBridgeProcesses();
     bridgeProcess = null;
     res.json({ status: "stopped", message: "Bridge process stopped." });
   });
@@ -255,8 +348,14 @@ async function startServer() {
   app.get("/api/bridge/status", (req, res) => {
     res.json({
       running: bridgeProcess !== null,
+      pid: bridgeProcess?.pid || null,
       logLines: bridgeLogBuffer,
     });
+  });
+
+  app.post("/api/bridge/logs/clear", (req, res) => {
+    bridgeLogBuffer = [];
+    res.json({ status: "cleared" });
   });
 
   // SSE stream for bridge logs
@@ -267,10 +366,11 @@ async function startServer() {
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
 
-    // Send a hello marker so the client knows the stream is connected
-    res.write(`data: ${JSON.stringify({ lines: ["[SYSTEM] Log stream connected."] })}\n\n`);
-
+    res.write(`data: ${JSON.stringify({ line: "[SYSTEM] Log stream connected." })}\n\n`);
     bridgeLogClients.push(res);
+    for (const line of bridgeLogBuffer) {
+      res.write(`data: ${JSON.stringify({ line })}\n\n`);
+    }
 
     req.on("close", () => {
       logToFile("[GET /api/bridge/logs] SSE Client disconnected.");
@@ -647,18 +747,43 @@ except KeyboardInterrupt:
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[SERVER] MSFS VR Flight Map Server running on http://localhost:${PORT}`);
+    // Kill any existing process on port 5912
+    try {
+      const { execSync } = require("child_process");
+      // Get PIDs from netstat and kill them
+      const netstat = execSync("netstat -ano", { encoding: "utf8", timeout: 5000 });
+      const lines = netstat.split("\n");
+      const pids = new Set<string>();
+      for (const line of lines) {
+        if (line.includes(":5912") && line.includes("LISTENING")) {
+          const parts = line.trim().split(/\s+/);
+          const pid = parts[parts.length - 1];
+          if (pid && /^\d+$/.test(pid)) pids.add(pid);
+        }
+      }
+      for (const pid of pids) {
+        try {
+          execSync("taskkill /PID " + pid + " /F", { stdio: "ignore" });
+          console.log("[SERVER] Killed existing bridge on port 5912 (PID: " + pid + ")");
+        } catch (e) { /* already dead */ }
+      }
+    } catch (e: any) {
+      console.log("[SERVER] Port 5912 cleanup error: " + e.message);
+    }
   });
 
   // Graceful shutdown: kill bridge process when server exits
   const shutdown = () => {
     if (bridgeProcess) {
-      bridgeProcess.kill("SIGTERM");
+      try { bridgeProcess.kill("SIGKILL"); } catch (e) { /* already dead */ }
       bridgeProcess = null;
     }
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  // Handle Vite HMR restart
+  process.on("SIGHUP", shutdown);
 }
 
 startServer();
