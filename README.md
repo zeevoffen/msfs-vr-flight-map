@@ -14,6 +14,30 @@ A **Leaflet-powered moving map** that displays your MSFS 2020 aircraft position 
 
 ---
 
+## 📸 Screenshots
+
+### 🗺️ Map Overview — HUD Panel
+![Map Overview with HUD](https://raw.githubusercontent.com/zeevoffen/msfs-vr-flight-map/main/screenshots/01-map-overview.png)
+
+*The main view: Leaflet moving map with the FlightDeckHUD overlay showing live telemetry — airspeed, altitude, heading, pitch/bank, fuel, gear/flaps, wind, and vertical speed.*
+
+### 📋 Flight Plan Panel
+![Flight Plan Panel](https://raw.githubusercontent.com/zeevoffen/msfs-vr-flight-map/main/screenshots/02-flight-plan.png)
+
+*Flight Plan tab: waypoint list with active leg highlighting, distance, bearing, and ETA — displayed alongside the route polyline on the map.*
+
+### 📖 Bridge Setup Guide
+![Bridge Setup Guide](https://raw.githubusercontent.com/zeevoffen/msfs-vr-flight-map/main/screenshots/03-bridge-guide.png)
+
+*Step-by-step MSFS Bridge setup guide built right into the UI — no need to dig through documentation.*
+
+### 🚀 Bridge Launcher & Log Viewer
+![Bridge Launcher](https://raw.githubusercontent.com/zeevoffen/msfs-vr-flight-map/main/screenshots/04-bridge-launcher.png)
+
+*Start/stop the Python SimConnect bridge from the browser with a live log viewer and connection status indicator.*
+
+---
+
 ## ✨ Features
 
 - **Live Telemetry** — Aircraft position, heading, speed, altitude, pitch/bank, fuel, gear/flaps, wind, and vertical speed streamed in real time via Server-Sent Events
