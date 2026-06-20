@@ -8,6 +8,7 @@ import {
   Compass, Map, Settings, Layers, Lock, Unlock, Navigation, 
   ChevronRight, ChevronLeft, RefreshCw, Plane, CheckCircle, Rocket
 } from "lucide-react";
+import { computeBearing } from "./utils/bearing";
 
 const DEFAULT_WAYPOINTS: Waypoint[] = [];
 
@@ -41,6 +42,10 @@ export default function App() {
   const activeLegPolylineRef = useRef<any>(null);
   const planeMarkerRef = useRef<any>(null);
   const waypointMarkersRef = useRef<any[]>([]);
+  // Store previous aircraft position to compute heading from movement vector
+  const prevPosRef = useRef<[number, number] | null>(null);
+  // Persist last displayed rotation when aircraft is stationary.
+  const rotationRef = useRef<number>(0);
 
   // Simulation state variables if using Mock Tracker
   const mockStateRef = useRef({
@@ -336,7 +341,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [mockActive, waypoints, activeWaypointIdx]);
+  }, [mockActive, waypoints, activeWaypointIdx, telemetry]);
 
   // Handle Mock simulator trigger
   const handleToggleMockSimulator = () => {
@@ -463,49 +468,37 @@ export default function App() {
     }
   }, [mapStyle]);
 
-  // 6. Draw Flight Plan Route (Waypoints path lines & labels)
+  // 6. Draw Flight Plan Waypoint Markers (departure & destination only)
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
     const L = (window as any).L;
 
-    // Clear existing markers
+    // Clear existing markers only
     waypointMarkersRef.current.forEach(m => map.removeLayer(m));
     waypointMarkersRef.current = [];
 
-    // Clear old line polylines
-    if (routePolylineRef.current) map.removeLayer(routePolylineRef.current);
-    if (activeLegPolylineRef.current) map.removeLayer(activeLegPolylineRef.current);
-
     if (waypoints.length === 0) return;
 
-    // Draw full flight polyline pathway (dashed cyan high contrast neon line)
-    const latlngs = waypoints.map(w => [w.latitude, w.longitude] as [number, number]);
-    const routePoly = L.polyline(latlngs, {
-      color: "#06b6d4", // Cyan 500
-      weight: 3,
-      dashArray: "6, 8",
-      opacity: 0.75,
-    }).addTo(map);
-    routePolylineRef.current = routePoly;
+    // Only show markers for departure (first) and destination (last) waypoints
+    const indicesToShow = new Set<number>();
+    indicesToShow.add(0);
+    if (waypoints.length > 1) indicesToShow.add(waypoints.length - 1);
 
-    // Active tracking leg is drawn in the plane marker effect below
-
-    // Add airport/waypoint custom markers onto Leaflet map
     waypoints.forEach((wp, idx) => {
-      const isCurrentTarget = idx === activeWaypointIdx;
-      
-      // Determine elegant color badge based on station type
-      let markerColor = "#06b6d4"; // Cyan default
-      if (isCurrentTarget) markerColor = "#f59e0b"; // Flight path Active leg (Amber)
-      else if (wp.type === "Airport") markerColor = "#ec4899"; // Airport (Pink)
-      else if (wp.type === "VOR") markerColor = "#8b5cf6"; // Nav Range VOR (Purple)
+      if (!indicesToShow.has(idx)) return;
 
+      const isFirst = idx === 0;
+      let markerColor = "#06b6d4";
+      if (isFirst) markerColor = "#10b981"; // Departure (Green)
+      else markerColor = "#f59e0b";           // Destination (Amber)
+
+      const label = isFirst ? "DEP" : "ARR";
       const markerHtml = `
         <div class="relative flex items-center justify-center">
-          <span class="absolute w-3 h-3 rounded-full flex items-center justify-center" style="background: ${markerColor}; border: 1.5px solid white;"></span>
-          <span class="absolute -bottom-5 bg-zinc-950/90 border border-zinc-800 text-[9px] font-mono font-bold leading-none px-1 py-0.5 rounded text-zinc-100 whitespace-nowrap shadow-md">
-            ${idx + 1}. ${wp.name}
+          <span class="absolute w-4 h-4 rounded-full flex items-center justify-center" style="background: ${markerColor}; border: 2px solid white; box-shadow: 0 0 8px ${markerColor};"></span>
+          <span class="absolute -bottom-5 bg-zinc-950/90 border border-zinc-800 text-[9px] font-mono font-bold leading-none px-1.5 py-0.5 rounded text-zinc-100 whitespace-nowrap shadow-md">
+            ${label}: ${wp.name}
           </span>
         </div>
       `;
@@ -513,8 +506,8 @@ export default function App() {
       const customIcon = L.divIcon({
         html: markerHtml,
         className: "custom-wp-marker",
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
       });
 
       const markerInstance = L.marker([wp.latitude, wp.longitude], { icon: customIcon })
@@ -524,88 +517,161 @@ export default function App() {
             <h4 class="font-bold border-b border-zinc-800 pb-1 text-zinc-200">${wp.name} ${wp.icao ? `(${wp.icao})` : ""}</h4>
             <p class="text-zinc-400">Position: ${wp.latitude.toFixed(5)}, ${wp.longitude.toFixed(5)}</p>
             ${wp.elevationFeet ? `<p class="text-zinc-400">Alt: ${wp.elevationFeet} FT</p>` : ""}
-            <p class="text-zinc-500 font-mono text-[10px]">Station Sequence: ${idx + 1}</p>
+            <p class="text-zinc-500 font-mono text-[10px]">${isFirst ? "Departure" : "Destination"}</p>
           </div>
         `);
 
       waypointMarkersRef.current.push(markerInstance);
     });
 
-    // Make map bounds encompass all waypoints on first drop
-    if (waypoints.length > 0 && mapLock === false) {
-      map.fitBounds(routePoly.getBounds(), { padding: [50, 50] });
-    }
+    // Cleanup: remove markers when effect re-runs
+    return () => {
+      waypointMarkersRef.current.forEach(m => {
+        try { map.removeLayer(m); } catch (e) {}
+      });
+      waypointMarkersRef.current = [];
+    };
+  }, [waypoints, activeWaypointIdx]);
 
-  }, [waypoints, activeWaypointIdx, telemetry]);
-
-  // 7. Render & Sync Aircraft position marker in real-time
+  // 7. Render & Sync Aircraft position marker in real-time, draw full remaining route, and orient triangle based on a point 50 m behind the aircraft
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !telemetry) return;
     const L = (window as any).L;
 
-    const { latitude, longitude, heading, airspeed } = telemetry;
+    const { latitude, longitude, heading } = telemetry;
+    console.log('DEBUG telemetry', { latitude, longitude, heading });
 
-    // Aircraft Marker - clean triangle pointing in heading direction
+    // ------------------------------------------------------------
+    // Compute rotation so the triangle points toward the destination airport
+    // ------------------------------------------------------------
+    // Determine ordered waypoints (may be reversed depending on aircraft position)
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const haversine = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+      const R = 3440.065; // Earth radius in NM
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    };
+
+    const first = waypoints[0];
+    const last = waypoints[waypoints.length - 1];
+    const distToFirst = haversine(latitude, longitude, first.latitude, first.longitude);
+    const distToLast = haversine(latitude, longitude, last.latitude, last.longitude);
+    const orderedWaypoints = distToLast < distToFirst ? [...waypoints].reverse() : waypoints;
+
+    // Destination is the last waypoint in the ordered list
+    const destWp = orderedWaypoints[orderedWaypoints.length - 1];
+    // Compute rotation based on the movement vector (previous → current).
+    // If we don't have a previous position yet, fall back to the telemetry heading.
+    // Compute rotation based on the movement vector (previous → current).
+    // This follows the original requirement: compare the last known position
+    // with the current telemetry position to derive the heading. If we don't
+    // have a previous position yet (first update), fall back to the heading
+    // reported by the telemetry.
+    // Compute rotation based on the movement vector (previous → current).
+    // This reflects the actual direction of travel. If we don't have a previous
+    // position yet (first update), fall back to the telemetry heading.
+    // Use telemetry heading directly, but keep the last displayed heading when the
+    // simulation is paused (no change in heading). This avoids the arrow snapping
+    // back to north when the aircraft is stationary.
+    let rotationDeg = rotationRef.current;
+    if (Math.abs(heading - rotationRef.current) > 0.1) {
+      rotationDeg = heading;
+      rotationRef.current = rotationDeg;
+    }
+    console.log('DEBUG rotationDeg', rotationDeg, 'telemetry heading', heading);
+    // Store current position for the next update
+    prevPosRef.current = [latitude, longitude];
+
+    // ------------------------------------------------------------
+    // ------------------------------------------------------------
+    // Aircraft Marker – triangle rotated by computed angle
+    // ------------------------------------------------------------
+    // We remove and re-create the marker on every update so the CSS rotation
+    // is always applied fresh. This avoids Leaflet caching the old icon HTML.
+    // The icon div is intentionally larger than the SVG to prevent clipping
+    // when the triangle is rotated.
+    const markerSize = 40;
+    const half = markerSize / 2;
+    // IMPORTANT: The outer div must NOT have a CSS `transform` because Leaflet
+    // applies its own `transform` (translate/translate3d) to position the icon
+    // on the map. If we set `transform: rotate(...)` on this element, it
+    // overwrites Leaflet's positioning and the marker jumps to a wrong location.
+    // Instead we rotate an inner <div> that Leaflet doesn't touch.
     const planeHtml = `
-      <div class="plane-marker" style="transform: rotate(${heading}deg); width: 28px; height: 28px;">
-        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;overflow:visible;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">
-          <polygon points="50,5 85,95 50,70 15,95" fill="#f59e0b" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
-        </svg>
+      <div style="width:${markerSize}px;height:${markerSize}px;display:flex;align-items:center;justify-content:center;">
+        <div style="transform-origin:center center;transform:rotate(${rotationDeg}deg);filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));">
+          <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="width:28px;height:28px;">
+            <polygon points="50,5 85,95 50,70 15,95" fill="#f59e0b" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
+          </svg>
+        </div>
       </div>
     `;
 
     const planeIcon = L.divIcon({
       html: planeHtml,
       className: "aircraft-marker-container",
-      iconSize: [28, 28],
-      iconAnchor: [14, 14],
+      iconSize: [markerSize, markerSize],
+      iconAnchor: [half, half],
     });
 
-    if (planeMarkerRef.current && map.hasLayer(planeMarkerRef.current)) {
-      // Animate update
-      planeMarkerRef.current.setLatLng([latitude, longitude]);
-      planeMarkerRef.current.setIcon(planeIcon);
-    } else {
-      if (planeMarkerRef.current) {
-        try {
-          map.removeLayer(planeMarkerRef.current);
-        } catch (e) {}
-      }
-      planeMarkerRef.current = L.marker([latitude, longitude], { icon: planeIcon }).addTo(map);
+    // Remove old marker and create a new one with the updated rotation.
+    if (planeMarkerRef.current) {
+      try { map.removeLayer(planeMarkerRef.current); } catch (e) {}
     }
+    planeMarkerRef.current = L.marker([latitude, longitude], {
+      icon: planeIcon,
+      keyboard: false,
+      zIndexOffset: 1000,
+    }).addTo(map);
 
-    // Auto Center Camera on Plane if Lock is enabled
+    // ------------------------------------------------------------
+    // Auto‑center camera on plane if lock is enabled
+    // ------------------------------------------------------------
     if (mapLock) {
       map.setView([latitude, longitude], map.getZoom(), { animate: true, duration: 0.6 });
     }
 
-    // Draw / update active navigation leg (amber line from plane to active waypoint)
-    if (waypoints.length > 0 && activeWaypointIdx < waypoints.length) {
-      const activeLegLatlngs = [
-        [latitude, longitude],
-        [waypoints[activeWaypointIdx].latitude, waypoints[activeWaypointIdx].longitude]
-      ];
-      if (activeLegPolylineRef.current && map.hasLayer(activeLegPolylineRef.current)) {
-        activeLegPolylineRef.current.setLatLngs(activeLegLatlngs);
-      } else {
-        if (activeLegPolylineRef.current) {
-          try { map.removeLayer(activeLegPolylineRef.current); } catch(e) {}
-        }
-        activeLegPolylineRef.current = L.polyline(activeLegLatlngs, {
-          color: "#f59e0b",
-          weight: 4,
-          opacity: 0.9,
-        }).addTo(map);
-      }
-    } else {
-      // Remove active leg line if no waypoints
-      if (activeLegPolylineRef.current) {
-        try { map.removeLayer(activeLegPolylineRef.current); } catch(e) {}
-        activeLegPolylineRef.current = null;
-      }
+    // ------------------------------------------------------------
+    // Draw the full flight plan route: start airport → ... → destination airport
+    // This uses the waypoints received from MSFS telemetry, regardless of the
+    // aircraft's current position. The aircraft marker (planeMarkerRef) already
+    // shows the live position.
+    // ------------------------------------------------------------
+    let currentPolyline: any = null;
+    if (waypoints.length > 1) {
+      // Determine if the flight plan should be displayed in reverse order.
+      // If the aircraft is closer to the last waypoint than to the first,
+      // we assume the user is flying from the last airport back to the first.
+      const toRad = (deg: number) => (deg * Math.PI) / 180;
+      const haversine = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+        const R = 3440.065; // Earth radius in NM
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      };
+
+      const first = waypoints[0];
+      const last = waypoints[waypoints.length - 1];
+      const distToFirst = haversine(latitude, longitude, first.latitude, first.longitude);
+      const distToLast = haversine(latitude, longitude, last.latitude, last.longitude);
+
+      const orderedWaypoints = distToLast < distToFirst ? [...waypoints].reverse() : waypoints;
+      const routeCoords = orderedWaypoints.map(wp => [wp.latitude, wp.longitude] as [number, number]);
+      currentPolyline = L.polyline(routeCoords, { color: "#f59e0b", weight: 4, opacity: 0.9 }).addTo(map);
     }
 
+    // Cleanup on re‑run / unmount (StrictMode safe)
+    return () => {
+      if (currentPolyline) {
+        try { map.removeLayer(currentPolyline); } catch (e) {}
+      }
+    };
   }, [telemetry, mapLock, waypoints, activeWaypointIdx]);
 
   return (
