@@ -1,0 +1,261 @@
+Page Title: MSFS VR Flight Map
+URL: http://localhost:3000/
+Snapshot: 
+- generic [ref=e3]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - button "FLIGHT HUD" [ref=e7]:
+        - img [ref=e8]
+        - text: FLIGHT HUD
+      - button "FLIGHT PLAN" [ref=e11]:
+        - img [ref=e12]
+        - text: FLIGHT PLAN
+      - button "DATA BRIDGE" [ref=e14]:
+        - img [ref=e15]
+        - text: DATA BRIDGE
+      - button "LAUNCHER" [ref=e18]:
+        - img [ref=e19]
+        - text: LAUNCHER
+    - generic [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - img [ref=e28]
+          - generic [ref=e30]: COCKPIT DATA LINK
+        - generic [ref=e31]:
+          - button "Debug" [ref=e32] [cursor=pointer]: Debug
+          - generic [ref=e35]: DEBUG DEMO
+      - generic [ref=e37]:
+        - generic [ref=e38]:
+          - generic [ref=e39]: Heading Compass
+          - generic [ref=e43]:
+            - generic [ref=e45]: "204"
+            - generic [ref=e48]: "214"
+            - generic [ref=e51]: "224"
+            - generic [ref=e54]: "234"
+            - generic [ref=e57]: "244"
+            - generic [ref=e60]: "254"
+            - generic [ref=e63]: "264"
+            - generic [ref=e66]: "274"
+            - generic [ref=e69]: "284"
+          - generic [ref=e71]: 244°
+        - generic [ref=e72]:
+          - generic [ref=e73]:
+            - generic [ref=e75]: Pitch 2°
+            - generic [ref=e77]: Pitch 2°
+          - generic [ref=e79]: "BANK: 0°"
+          - generic [ref=e80]: "TYPE: Debug Demo – Ces"
+          - generic [ref=e81]: AIRBORNE
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - generic [ref=e84]:
+              - generic [ref=e85]: Indicated IAS
+              - img [ref=e86]
+            - generic [ref=e89]:
+              - generic [ref=e90]: "180"
+              - generic [ref=e91]: KT
+            - generic [ref=e92]: "GS: 182 KT"
+          - generic [ref=e93]:
+            - generic [ref=e94]:
+              - generic [ref=e95]: Altitude
+              - img [ref=e96]
+            - generic [ref=e98]:
+              - generic [ref=e99]: 3,111
+              - generic [ref=e100]: FT
+            - generic [ref=e101]: "VS: 0 FPM"
+        - generic [ref=e102]:
+          - generic [ref=e103]: Cockpit Systems Status
+          - generic [ref=e104]:
+            - generic [ref=e105]:
+              - generic [ref=e106]: "Gear:"
+              - generic [ref=e107]: UP
+            - generic [ref=e108]:
+              - generic [ref=e109]: "Flaps:"
+              - generic [ref=e110]: RETRACTED
+            - generic [ref=e111]:
+              - generic [ref=e112]: "Fuel Qty:"
+              - generic [ref=e116]: 80%
+        - generic [ref=e117]:
+          - generic [ref=e118]:
+            - generic [ref=e119]: Active Navigation Leg
+            - img [ref=e120]
+          - generic [ref=e122]:
+            - generic [ref=e123]:
+              - generic [ref=e124]: Waypoint 17
+              - generic [ref=e125]: WAYPOINT
+            - generic [ref=e126]:
+              - generic [ref=e127]:
+                - generic [ref=e128]: Distance
+                - generic [ref=e129]: 176.8 NM
+              - generic [ref=e130]:
+                - generic [ref=e131]: Required CRS
+                - generic [ref=e132]: 063°
+        - generic [ref=e133]:
+          - generic [ref=e134]:
+            - generic [ref=e135]: Flight Plan
+            - generic [ref=e136]: 19 waypoints
+          - generic [ref=e137]:
+            - generic [ref=e138]:
+              - generic [ref=e139]: ✓
+              - generic [ref=e140]: Dubai
+              - generic [ref=e141]: AIRPT
+            - generic [ref=e142]:
+              - generic [ref=e143]: ✓
+              - generic [ref=e144]: Waypoint 1
+            - generic [ref=e145]:
+              - generic [ref=e146]: ✓
+              - generic [ref=e147]: Waypoint 2
+            - generic [ref=e148]:
+              - generic [ref=e149]: ✓
+              - generic [ref=e150]: Waypoint 3
+            - generic [ref=e151]:
+              - generic [ref=e152]: ✓
+              - generic [ref=e153]: Waypoint 4
+            - generic [ref=e154]:
+              - generic [ref=e155]: ✓
+              - generic [ref=e156]: Waypoint 5
+            - generic [ref=e157]:
+              - generic [ref=e158]: ✓
+              - generic [ref=e159]: Waypoint 6
+            - generic [ref=e160]:
+              - generic [ref=e161]: ✓
+              - generic [ref=e162]: Waypoint 7
+            - generic [ref=e163]:
+              - generic [ref=e164]: ✓
+              - generic [ref=e165]: Waypoint 8
+            - generic [ref=e166]:
+              - generic [ref=e167]: ✓
+              - generic [ref=e168]: Waypoint 9
+            - generic [ref=e169]:
+              - generic [ref=e170]: ✓
+              - generic [ref=e171]: Waypoint 10
+            - generic [ref=e172]:
+              - generic [ref=e173]: ✓
+              - generic [ref=e174]: Waypoint 11
+            - generic [ref=e175]:
+              - generic [ref=e176]: ✓
+              - generic [ref=e177]: Waypoint 12
+            - generic [ref=e178]:
+              - generic [ref=e179]: ✓
+              - generic [ref=e180]: Waypoint 13
+            - generic [ref=e181]:
+              - generic [ref=e182]: ✓
+              - generic [ref=e183]: Waypoint 14
+            - generic [ref=e184]:
+              - generic [ref=e185]: ✓
+              - generic [ref=e186]: Waypoint 15
+            - generic [ref=e187]:
+              - generic [ref=e188]: ✓
+              - generic [ref=e189]: Waypoint 16
+            - generic [ref=e190]:
+              - generic [ref=e191]: ▶
+              - generic [ref=e192]: Waypoint 17
+            - generic [ref=e193]:
+              - generic [ref=e194]: ◆
+              - generic [ref=e195]: Lagos Murtala Muhammed
+              - generic [ref=e196]: AIRPT
+        - generic [ref=e197]:
+          - generic [ref=e198]:
+            - img [ref=e199]
+            - text: Heading Debug
+          - generic [ref=e202]:
+            - generic [ref=e203]:
+              - text: "Heading:"
+              - generic [ref=e204]: 243.5°
+            - generic [ref=e205]: "Lat: 6.5800"
+            - generic [ref=e206]:
+              - text: "Rotation:"
+              - generic [ref=e207]: 243.5°
+            - generic [ref=e208]: "Lng: 3.3200"
+          - img [ref=e211]:
+            - generic [ref=e213]: "N"
+            - generic [ref=e214]: E
+            - generic [ref=e215]: S
+            - generic [ref=e216]: W
+          - generic [ref=e219]: Arrow should point in direction of travel
+        - generic [ref=e220]:
+          - generic [ref=e221]:
+            - generic [ref=e222]: Current Position
+            - img [ref=e223]
+          - generic [ref=e226]:
+            - generic [ref=e227]: 6.5800°N, 3.3200°E
+            - generic [ref=e228]: Over water / remote area
+        - generic [ref=e230]:
+          - img [ref=e231]
+          - generic [ref=e235]:
+            - generic [ref=e236]: Crosswind Vector
+            - generic [ref=e237]: 004° @ 5 KT
+  - button "Hide Left deck" [ref=e241] [cursor=pointer]:
+    - img [ref=e242]
+  - generic [ref=e244]:
+    - generic [ref=e245]:
+      - generic:
+        - generic:
+          - img
+        - generic:
+          - button "DEP" [ref=e247] [cursor=pointer]:
+            - generic [ref=e250]: DEP
+          - button "1" [ref=e251] [cursor=pointer]:
+            - generic [ref=e254]: "1"
+          - button "2" [ref=e255] [cursor=pointer]:
+            - generic [ref=e258]: "2"
+          - button "3" [ref=e259] [cursor=pointer]:
+            - generic [ref=e262]: "3"
+          - button "4" [ref=e263] [cursor=pointer]:
+            - generic [ref=e266]: "4"
+          - button "5" [ref=e267] [cursor=pointer]:
+            - generic [ref=e270]: "5"
+          - button "6" [ref=e271] [cursor=pointer]:
+            - generic [ref=e274]: "6"
+          - button "7" [ref=e275] [cursor=pointer]:
+            - generic [ref=e278]: "7"
+          - button "8" [ref=e279] [cursor=pointer]:
+            - generic [ref=e282]: "8"
+          - button "9" [ref=e283] [cursor=pointer]:
+            - generic [ref=e286]: "9"
+          - button "10" [ref=e287] [cursor=pointer]:
+            - generic [ref=e290]: "10"
+          - button "11" [ref=e291] [cursor=pointer]:
+            - generic [ref=e294]: "11"
+          - button "12" [ref=e295] [cursor=pointer]:
+            - generic [ref=e298]: "12"
+          - button "13" [ref=e299] [cursor=pointer]:
+            - generic [ref=e302]: "13"
+          - button "14" [ref=e303] [cursor=pointer]:
+            - generic [ref=e306]: "14"
+          - button "15" [ref=e307] [cursor=pointer]:
+            - generic [ref=e310]: "15"
+          - button "16" [ref=e311] [cursor=pointer]:
+            - generic [ref=e314]: "16"
+          - button "17" [ref=e315] [cursor=pointer]:
+            - generic [ref=e318]: "17"
+          - button "ARR" [ref=e319] [cursor=pointer]:
+            - generic [ref=e322]: ARR
+          - img [ref=e326] [cursor=pointer]
+      - generic [ref=e328]:
+        - button "Zoom in" [ref=e329] [cursor=pointer]: +
+        - button "Zoom out" [ref=e330] [cursor=pointer]: −
+    - generic [ref=e331]:
+      - generic [ref=e332]:
+        - generic [ref=e335]: MSFS LINK
+        - generic [ref=e336]:
+          - generic [ref=e337]:
+            - text: "ALT:"
+            - generic [ref=e338]: 3111 ft
+          - generic [ref=e339]:
+            - text: "HDG:"
+            - generic [ref=e340]: 244°
+          - generic [ref=e341]:
+            - text: "IAS:"
+            - generic [ref=e342]: 180 kt
+          - generic [ref=e343]: "LAT: 6.5800"
+      - generic [ref=e344]:
+        - button "Camera Lock" [ref=e345]:
+          - img [ref=e346]
+          - generic [ref=e349]: Camera Lock
+        - generic [ref=e351]:
+          - img [ref=e352]
+          - button "dark" [ref=e356]
+          - button "satellite" [ref=e357]
+          - button "aero" [ref=e358]
+          - button "topo" [ref=e359]
+          - button "street" [ref=e360]
