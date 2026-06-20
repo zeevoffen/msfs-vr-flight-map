@@ -23,6 +23,9 @@ export default function App() {
   const [mapLock, setMapLock] = useState<boolean>(true); // Holds camera follow on plane
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
   const [mockActive, setMockActive] = useState<boolean>(false);
+  // Debug demo mode – auto-activates to visually verify heading rotation
+  const [debugMode, setDebugMode] = useState<boolean>(true);
+  const debugIntervalRef = useRef<any>(null);
   const [localPcIp, setLocalPcIpState] = useState<string>(() => {
     return localStorage.getItem("msfs_local_pc_ip") || "127.0.0.1";
   });
@@ -46,6 +49,112 @@ export default function App() {
   const prevPosRef = useRef<[number, number] | null>(null);
   // Persist last displayed rotation when aircraft is stationary.
   const rotationRef = useRef<number>(0);
+
+  // Debug demo: generate a random flight path between two real airports
+  const generateDebugPath = (): Waypoint[] => {
+    // Real airports with ICAO codes around the world
+    const airports: { icao: string; name: string; lat: number; lng: number }[] = [
+      // Europe
+      { icao: "EGLL", name: "London Heathrow", lat: 51.47, lng: -0.46 },
+      { icao: "LFPG", name: "Paris CDG", lat: 49.01, lng: 2.55 },
+      { icao: "LIRF", name: "Rome Fiumicino", lat: 41.80, lng: 12.24 },
+      { icao: "LEBL", name: "Barcelona", lat: 41.29, lng: 2.08 },
+      { icao: "EHAM", name: "Amsterdam Schiphol", lat: 52.31, lng: 4.76 },
+      { icao: "EDDB", name: "Berlin Brandenburg", lat: 52.35, lng: 13.52 },
+      { icao: "LGAV", name: "Athens", lat: 37.94, lng: 23.94 },
+      { icao: "LTFM", name: "Istanbul", lat: 41.27, lng: 28.75 },
+      { icao: "BIKF", name: "Reykjavik Keflavik", lat: 63.99, lng: -22.61 },
+      { icao: "LPPT", name: "Lisbon", lat: 38.78, lng: -9.13 },
+      { icao: "LFMN", name: "Nice Côte d'Azur", lat: 43.66, lng: 7.22 },
+      { icao: "LSZH", name: "Zurich", lat: 47.46, lng: 8.55 },
+      { icao: "LOWW", name: "Vienna", lat: 48.11, lng: 16.57 },
+      // North America
+      { icao: "KJFK", name: "New York JFK", lat: 40.64, lng: -73.78 },
+      { icao: "KLAX", name: "Los Angeles", lat: 33.94, lng: -118.41 },
+      { icao: "KSFO", name: "San Francisco", lat: 37.62, lng: -122.38 },
+      { icao: "KMIA", name: "Miami", lat: 25.79, lng: -80.29 },
+      { icao: "KORD", name: "Chicago O'Hare", lat: 41.98, lng: -87.90 },
+      { icao: "KSEA", name: "Seattle Tacoma", lat: 47.45, lng: -122.31 },
+      { icao: "KLAS", name: "Las Vegas", lat: 36.08, lng: -115.15 },
+      { icao: "CYVR", name: "Vancouver", lat: 49.19, lng: -123.18 },
+      { icao: "MMMX", name: "Mexico City", lat: 19.44, lng: -99.07 },
+      { icao: "MMUN", name: "Cancún", lat: 21.04, lng: -86.87 },
+      { icao: "KDFW", name: "Dallas Fort Worth", lat: 32.90, lng: -97.04 },
+      { icao: "KATL", name: "Atlanta", lat: 33.64, lng: -84.43 },
+      // South America
+      { icao: "SBGL", name: "Rio de Janeiro Galeão", lat: -22.81, lng: -43.25 },
+      { icao: "SAEZ", name: "Buenos Aires Ezeiza", lat: -34.82, lng: -58.54 },
+      { icao: "SPJC", name: "Lima Jorge Chávez", lat: -12.02, lng: -77.11 },
+      { icao: "SKBO", name: "Bogotá El Dorado", lat: 4.70, lng: -74.15 },
+      { icao: "SCEL", name: "Santiago Arturo Merino", lat: -33.39, lng: -70.79 },
+      // Asia
+      { icao: "RJTT", name: "Tokyo Haneda", lat: 35.55, lng: 139.78 },
+      { icao: "ZBAA", name: "Beijing Capital", lat: 40.08, lng: 116.58 },
+      { icao: "VTBS", name: "Bangkok Suvarnabhumi", lat: 13.69, lng: 100.75 },
+      { icao: "WSSS", name: "Singapore Changi", lat: 1.36, lng: 103.99 },
+      { icao: "OMDB", name: "Dubai", lat: 25.25, lng: 55.36 },
+      { icao: "VABB", name: "Mumbai", lat: 19.09, lng: 72.87 },
+      { icao: "VHHH", name: "Hong Kong", lat: 22.31, lng: 113.92 },
+      { icao: "RKSI", name: "Seoul Incheon", lat: 37.46, lng: 126.45 },
+      { icao: "WADD", name: "Bali Ngurah Rai", lat: -8.75, lng: 115.17 },
+      { icao: "RCTP", name: "Taipei Taoyuan", lat: 25.08, lng: 121.23 },
+      // Africa
+      { icao: "HECA", name: "Cairo", lat: 30.12, lng: 31.41 },
+      { icao: "FACT", name: "Cape Town", lat: -33.97, lng: 18.60 },
+      { icao: "HKJK", name: "Nairobi Jomo Kenyatta", lat: -1.32, lng: 36.93 },
+      { icao: "GMMX", name: "Marrakech Menara", lat: 31.61, lng: -8.03 },
+      { icao: "DNMM", name: "Lagos Murtala Muhammed", lat: 6.58, lng: 3.32 },
+      // Oceania
+      { icao: "YSSY", name: "Sydney Kingsford Smith", lat: -33.94, lng: 151.18 },
+      { icao: "NZAA", name: "Auckland", lat: -37.01, lng: 174.79 },
+      { icao: "PHNL", name: "Honolulu", lat: 21.32, lng: -157.92 },
+    ];
+
+    // Pick two different airports
+    const idx1 = Math.floor(Math.random() * airports.length);
+    let idx2 = Math.floor(Math.random() * airports.length);
+    while (idx2 === idx1) idx2 = Math.floor(Math.random() * airports.length);
+    const dep = airports[idx1];
+    const arr = airports[idx2];
+
+    // Calculate distance between airports
+    const toRad = (d: number) => d * Math.PI / 180;
+    const dLat = toRad(arr.lat - dep.lat);
+    const dLng = toRad(arr.lng - dep.lng);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(dep.lat)) * Math.cos(toRad(arr.lat)) * Math.sin(dLng/2)**2;
+    const distNm = 3440.065 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    // Place waypoints every ~150-250 NM along the route
+    const legNm = 150 + Math.random() * 100;
+    const numIntermediate = Math.max(1, Math.floor(distNm / legNm));
+    const totalWps = numIntermediate + 2;
+
+    const wps: Waypoint[] = [];
+    for (let i = 0; i < totalWps; i++) {
+      const fraction = i / (totalWps - 1);
+      // Use proper great-circle interpolation (slerp)
+      const A = Math.sin((1 - fraction) * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))) / Math.sqrt(a);
+      const B = Math.sin(fraction * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))) / Math.sqrt(a);
+      const x = A * Math.cos(toRad(dep.lat)) * Math.cos(toRad(dep.lng)) + B * Math.cos(toRad(arr.lat)) * Math.cos(toRad(arr.lng));
+      const y = A * Math.cos(toRad(dep.lat)) * Math.sin(toRad(dep.lng)) + B * Math.cos(toRad(arr.lat)) * Math.sin(toRad(arr.lng));
+      const z = A * Math.sin(toRad(dep.lat)) + B * Math.sin(toRad(arr.lat));
+      const lat = Math.atan2(z, Math.sqrt(x*x + y*y)) * 180 / Math.PI;
+      const lng = Math.atan2(y, x) * 180 / Math.PI;
+
+      const isFirst = i === 0;
+      const isLast = i === totalWps - 1;
+      wps.push({
+        id: `DBG-${i}`,
+        name: isFirst ? dep.name : isLast ? arr.name : `Waypoint ${i}`,
+        latitude: lat,
+        longitude: lng,
+        elevationFeet: isFirst || isLast ? 0 : 3000 + Math.floor(Math.random() * 7000),
+        type: isFirst || isLast ? "Airport" : "Waypoint",
+      });
+    }
+    console.log(`[DEBUG] Flight: ${dep.icao} → ${arr.icao}, ${distNm.toFixed(0)} NM, ${totalWps} waypoints`);
+    return wps;
+  };
 
   // Simulation state variables if using Mock Tracker
   const mockStateRef = useRef({
@@ -198,7 +307,50 @@ export default function App() {
     }
   };
 
-  // 3. Built-in Cockpit autopilot simulation state update (Mock system)
+  // 3. Debug demo mode – auto-starts a flight over the Mediterranean
+  useEffect(() => {
+    if (!debugMode) return;
+    // Generate a random Mediterranean path and start flying
+    const debugWps = generateDebugPath();
+    setWaypoints(debugWps);
+    setActiveWaypointIdx(0);
+    mockStateRef.current.lat = debugWps[0].latitude;
+    mockStateRef.current.lng = debugWps[0].longitude;
+    mockStateRef.current.altitude = 5000;
+    mockStateRef.current.heading = 135; // SE heading
+    setMockActive(true);
+    setTelemetry({
+      latitude: debugWps[0].latitude,
+      longitude: debugWps[0].longitude,
+      altitude: 5000,
+      heading: 135,
+      airspeed: 120,
+      verticalSpeed: 0,
+      pitch: 1.5,
+      bank: 0,
+      groundSpeed: 122,
+      isConnected: true,
+      aircraftType: "Debug Demo – Cessna 172",
+      timestamp: Date.now(),
+      onGround: false,
+      flaps: 0,
+      gear: "Up",
+      windSpeed: 5,
+      windDir: 225,
+      fuelPercent: 95,
+    });
+    // Center map on the debug path
+    setTimeout(() => {
+      const map = mapInstanceRef.current;
+      if (map) map.setView([debugWps[0].latitude, debugWps[0].longitude], 6);
+    }, 500);
+  }, [debugMode]);
+
+  // Track progress along the flight path for debug mode
+  const debugPathProgressRef = useRef(0); // fractional waypoint index
+  const debugPathDirectionRef = useRef(1); // 1 = forward, -1 = reverse
+
+  // 3b. Built-in Cockpit autopilot simulation state update (Mock system)
   useEffect(() => {
     if (!mockActive) return;
 
@@ -207,10 +359,9 @@ export default function App() {
       const sampleWaypoints: Waypoint[] = [
         { id: "KRNO-L", name: "KRNO (Reno)", latitude: 39.4991, longitude: -119.7681, elevationFeet: 4415, type: "Airport" },
         { id: "KLOL-L", name: "KLOL (Lovelock)", latitude: 40.0983, longitude: -118.5689, elevationFeet: 3960, type: "Airport" },
-        { id: "KWMC-L", name: "KWMC (Winnemucca)", latitude: 40.7007, longitude: -117.7917, elevationFeet: 4308, type: "Airport" },
+        { name: "KWMC (Winnemucca)", id: "KWMC-L", latitude: 40.7007, longitude: -117.7917, elevationFeet: 4308, type: "Airport" },
         { id: "KEKO-L", name: "KEKO (Elko)", latitude: 40.8249, longitude: -115.7917, elevationFeet: 5140, type: "Airport" },
       ];
-      // compute leg distances
       for (let i = 0; i < sampleWaypoints.length - 1; i++) {
         const p1 = sampleWaypoints[i];
         const p2 = sampleWaypoints[i + 1];
@@ -225,123 +376,158 @@ export default function App() {
       }
       setWaypoints(sampleWaypoints);
       setActiveWaypointIdx(0);
-
-      // position plane initially at KRNO Reno
       mockStateRef.current.lat = 39.4991;
       mockStateRef.current.lng = -119.7681;
       mockStateRef.current.altitude = 4415;
+      debugPathProgressRef.current = 0;
     }
 
     const interval = setInterval(() => {
       const state = mockStateRef.current;
-      let targetLat = state.lat;
-      let targetLng = state.lng;
-      let targetAlt = 3500;
-      let desiredHdg = state.heading;
 
-      // Navigate towards active waypoint if available
-      if (waypoints.length > 0 && activeWaypointIdx < waypoints.length) {
-        const targetWp = waypoints[activeWaypointIdx];
-        targetLat = targetWp.latitude;
-        targetLng = targetWp.longitude;
-        targetAlt = targetWp.elevationFeet ? targetWp.elevationFeet + 3000 : 3500;
+      if (waypoints.length < 2) return;
 
-        // Calculate bearing to target
-        const dLon = ((targetLng - state.lng) * Math.PI) / 180;
-        const lat1 = (state.lat * Math.PI) / 180;
-        const lat2 = (targetLat * Math.PI) / 180;
-        
-        const y = Math.sin(dLon) * Math.cos(lat2);
-        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-        desiredHdg = (Math.atan2(y, x) * 180) / Math.PI;
-        desiredHdg = (desiredHdg + 360) % 360;
+      if (debugMode) {
+        // DEBUG MODE: Interpolate plane position directly along the path
+        // This guarantees the plane flies exactly on the drawn route
+        const totalLegs = waypoints.length - 1;
+        // Advance progress (speed: ~0.04 legs per tick at 200ms = ~200 knots)
+        debugPathProgressRef.current = Math.min(totalLegs, debugPathProgressRef.current + 0.04);
+        const progress = debugPathProgressRef.current;
+        const legIdx = Math.min(Math.floor(progress), totalLegs - 1);
+        const legFrac = progress - legIdx;
+        const fromWp = waypoints[legIdx];
+        const toWp = waypoints[legIdx + 1];
+        // Linear interpolation between waypoints
+        const lat = fromWp.latitude + (toWp.latitude - fromWp.latitude) * legFrac;
+        const lng = fromWp.longitude + (toWp.longitude - fromWp.longitude) * legFrac;
+        // Calculate heading from movement direction
+        const dLng = ((toWp.longitude - fromWp.longitude) * Math.PI) / 180;
+        const lat1r = (fromWp.latitude * Math.PI) / 180;
+        const lat2r = (toWp.latitude * Math.PI) / 180;
+        const y = Math.sin(dLng) * Math.cos(lat2r);
+        const x = Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLng);
+        const hdg = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+        // Altitude: cruise at FL180-ish, descend near destination
+        const altFrac = legIdx / totalLegs;
+        const alt = altFrac > 0.85 ? 5000 - (altFrac - 0.85) / 0.15 * 3000 : 5000 + Math.sin(legFrac * Math.PI) * 2000;
+        // Update active waypoint index for the HUD
+        if (legIdx !== activeWaypointIdx && legIdx < waypoints.length) {
+          setActiveWaypointIdx(legIdx);
+        }
+        state.lat = lat;
+        state.lng = lng;
+        state.heading = hdg;
+        state.altitude = alt;
+        state.bank = 0;
+        state.verticalSpeed = 0;
+        state.pitch = 1.5;
+        state.airspeed = 180;
+        state.groundSpeed = 182;
+        state.fuelPercent = Math.max(0, state.fuelPercent - 0.02);
+        // Bounce: reverse direction at both ends instead of jumping
+        if (progress >= totalLegs) {
+          debugPathProgressRef.current = totalLegs;
+          debugPathDirectionRef.current = -1;
+        } else if (progress <= 0) {
+          debugPathProgressRef.current = 0;
+          debugPathDirectionRef.current = 1;
+        }
+        debugPathProgressRef.current += 0.04 * debugPathDirectionRef.current;
+        setTelemetry({
+          latitude: lat, longitude: lng, altitude: alt,
+          heading: hdg, airspeed: 180, verticalSpeed: 0, pitch: 1.5, bank: 0,
+          groundSpeed: 182, isConnected: true, aircraftType: "Debug Demo – Cessna 172",
+          timestamp: Date.now(), onGround: false, flaps: 0, gear: "Up",
+          windSpeed: 5, windDir: (hdg + 120) % 360, fuelPercent: state.fuelPercent,
+        });
+      } else {
+        // NORMAL SIM MODE: fly toward active waypoint with smooth physics
+        let targetLat = state.lat;
+        let targetLng = state.lng;
+        let targetAlt = 3500;
+        let desiredHdg = state.heading;
 
-        // Check if destination arrived (within 0.15 NM)
-        const radLat1 = (state.lat * Math.PI) / 180;
-        const radLat2 = (targetLat * Math.PI) / 180;
-        const deltaLat = ((targetLat - state.lat) * Math.PI) / 180;
-        const deltaLon = ((targetLng - state.lng) * Math.PI) / 180;
-        const a = Math.sin(deltaLat/2)*Math.sin(deltaLat/2) + Math.cos(radLat1)*Math.cos(radLat2)*Math.sin(deltaLon/2)*Math.sin(deltaLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const currentDistNm = c * 3440.065;
-
-        if (currentDistNm < 0.2) {
-          // Advance to next waypoint
-          if (activeWaypointIdx < waypoints.length - 1) {
+        if (activeWaypointIdx < waypoints.length) {
+          const activeWp = waypoints[activeWaypointIdx];
+          targetLat = activeWp.latitude;
+          targetLng = activeWp.longitude;
+          targetAlt = activeWp.elevationFeet ? activeWp.elevationFeet + 3000 : 3500;
+          const dLon1 = ((targetLng - state.lng) * Math.PI) / 180;
+          const lat1r = (state.lat * Math.PI) / 180;
+          const lat2r = (targetLat * Math.PI) / 180;
+          const y1 = Math.sin(dLon1) * Math.cos(lat2r);
+          const x1 = Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLon1);
+          desiredHdg = (Math.atan2(y1, x1) * 180 / Math.PI + 360) % 360;
+          const dLat1 = ((targetLat - state.lat) * Math.PI) / 180;
+          const dLon2 = ((targetLng - state.lng) * Math.PI) / 180;
+          const a1 = Math.sin(dLat1/2)*Math.sin(dLat1/2) + Math.cos((state.lat*Math.PI)/180)*Math.cos((targetLat*Math.PI)/180)*Math.sin(dLon2/2)*Math.sin(dLon2/2);
+          const currentDistNm = 3440.065 * 2 * Math.atan2(Math.sqrt(a1), Math.sqrt(1-a1));
+          if (currentDistNm < 0.3 && activeWaypointIdx < waypoints.length - 1) {
             setActiveWaypointIdx((prev) => prev + 1);
-          } else {
-            // Circle over airport / destination
-            desiredHdg = (state.heading + 2) % 360;
           }
         }
+        let hdgDiff = desiredHdg - state.heading;
+        if (hdgDiff > 180) hdgDiff -= 360;
+        if (hdgDiff < -180) hdgDiff += 360;
+        const turnRateDegPerSec = 4;
+        if (Math.abs(hdgDiff) > 0.5) {
+          const turnStep = Math.sign(hdgDiff) * Math.min(turnRateDegPerSec, Math.abs(hdgDiff));
+          state.heading = (state.heading + turnStep + 360) % 360;
+          state.bank = Math.sign(hdgDiff) * Math.min(18, Math.abs(hdgDiff) * 3);
+        } else {
+          state.heading = desiredHdg;
+          state.bank = 0;
+        }
+        const altDiff = targetAlt - state.altitude;
+        if (Math.abs(altDiff) > 50) {
+          state.altitude += Math.sign(altDiff) * Math.min(100, Math.abs(altDiff));
+          state.verticalSpeed = Math.sign(altDiff) * 400;
+          state.pitch = Math.sign(altDiff) * 5;
+        } else {
+          state.altitude = targetAlt;
+          state.verticalSpeed = 0;
+          state.pitch = 1.0;
+        }
+        const speedFactor = 0.0005;
+        const radHdg = (state.heading * Math.PI) / 180;
+        state.lat += Math.cos(radHdg) * speedFactor;
+        state.lng += Math.sin(radHdg) * speedFactor;
+        state.fuelPercent = Math.max(0, state.fuelPercent - 0.05);
+        setTelemetry({
+          latitude: state.lat, longitude: state.lng, altitude: state.altitude,
+          heading: state.heading, airspeed: state.airspeed, verticalSpeed: state.verticalSpeed,
+          pitch: state.pitch, bank: state.bank, groundSpeed: state.airspeed + 2,
+          isConnected: true, aircraftType: "Cessna 172 Skyhawk",
+          timestamp: Date.now(), onGround: false, flaps: state.flaps, gear: state.gear,
+          windSpeed: 8, windDir: (state.heading + 120) % 360, fuelPercent: state.fuelPercent,
+        });
       }
-
-      // Smooth heading bank calculation
-      let hdgDiff = desiredHdg - state.heading;
-      if (hdgDiff > 180) hdgDiff -= 360;
-      if (hdgDiff < -185) hdgDiff += 360;
-
-      // Adjust heading slowly
-      const turnRateDegPerSec = 4;
-      if (Math.abs(hdgDiff) > 1) {
-        const turnStep = Math.sign(hdgDiff) * Math.min(turnRateDegPerSec, Math.abs(hdgDiff));
-        state.heading = (state.heading + turnStep + 360) % 360;
-        // set plane bank angle
-        state.bank = Math.sign(hdgDiff) * Math.min(18, Math.abs(hdgDiff) * 3);
-      } else {
-        state.heading = desiredHdg;
-        state.bank = 0;
-      }
-
-      // Climb or descend to target altitude
-      const vsRate = 400; // fpm step approximation (around 7 feet per second)
-      const altDiff = targetAlt - state.altitude;
-      if (Math.abs(altDiff) > 50) {
-        const altStep = Math.sign(altDiff) * Math.min(100, Math.abs(altDiff));
-        state.altitude += altStep;
-        state.verticalSpeed = Math.sign(altDiff) * vsRate;
-        state.pitch = Math.sign(altDiff) * 5;
-      } else {
-        state.altitude = targetAlt;
-        state.verticalSpeed = 0;
-        state.pitch = 1.0;
-      }
-
-      // Advance aircraft coordinate forward
-      // At 120 WT, it is ~0.033 NM/sec. In Lat/Lng degree terms, roughly 0.0005 degrees per second.
-      const speedFactor = 0.0005;
-      const radHdg = (state.heading * Math.PI) / 180;
-      state.lat += Math.cos(radHdg) * speedFactor;
-      state.lng += Math.sin(radHdg) * speedFactor;
-
-      // Fuel consumption approximation
-      state.fuelPercent = Math.max(0, state.fuelPercent - 0.05);
-
-      setTelemetry({
-        latitude: state.lat,
-        longitude: state.lng,
-        altitude: state.altitude,
-        heading: state.heading,
-        airspeed: state.airspeed,
-        verticalSpeed: state.verticalSpeed,
-        pitch: state.pitch,
-        bank: state.bank,
-        groundSpeed: state.airspeed + 2, // Tailwind component simulation
-        isConnected: true,
-        aircraftType: "Cessna 172 Skyhawk",
-        timestamp: Date.now(),
-        onGround: false,
-        flaps: state.flaps,
-        gear: state.gear,
-        windSpeed: 8,
-        windDir: (state.heading + 120) % 360,
-        fuelPercent: state.fuelPercent,
-      });
-
-    }, 1000);
+    }, debugMode ? 200 : 1000);
 
     return () => clearInterval(interval);
-  }, [mockActive, waypoints, activeWaypointIdx, telemetry]);
+  }, [mockActive, waypoints, activeWaypointIdx, telemetry, debugMode]);
+
+  // Toggle between Debug Demo mode and Real Sim mode
+  const handleToggleDebugMode = () => {
+    if (debugMode) {
+      // Switching OFF debug mode → go back to real sim / standby
+      setDebugMode(false);
+      setMockActive(false);
+      setTelemetry(null);
+      setWaypoints([]);
+      setActiveWaypointIdx(0);
+      // Reset mock state to defaults
+      mockStateRef.current = {
+        lat: 39.5, lng: -119.8, heading: 240, altitude: 3500,
+        airspeed: 120, pitch: 1.5, bank: 0, verticalSpeed: 0,
+        fuelPercent: 88, flaps: 0, gear: "Up",
+      };
+    } else {
+      // Switching ON debug mode → start demo flight
+      setDebugMode(true);
+    }
+  };
 
   // Handle Mock simulator trigger
   const handleToggleMockSimulator = () => {
@@ -480,25 +666,28 @@ export default function App() {
 
     if (waypoints.length === 0) return;
 
-    // Only show markers for departure (first) and destination (last) waypoints
-    const indicesToShow = new Set<number>();
-    indicesToShow.add(0);
-    if (waypoints.length > 1) indicesToShow.add(waypoints.length - 1);
-
+    // Show markers for ALL waypoints
     waypoints.forEach((wp, idx) => {
-      if (!indicesToShow.has(idx)) return;
-
       const isFirst = idx === 0;
-      let markerColor = "#06b6d4";
-      if (isFirst) markerColor = "#10b981"; // Departure (Green)
-      else markerColor = "#f59e0b";           // Destination (Amber)
+      const isLast = idx === waypoints.length - 1;
+      const isPassed = idx < activeWaypointIdx;
+      const isCurrent = idx === activeWaypointIdx;
 
-      const label = isFirst ? "DEP" : "ARR";
+      // Color: green=departure, amber=destination, cyan=current, dimmed=passed, gray=upcoming
+      let markerColor = "#6b7280"; // upcoming (gray)
+      let markerSize = 8;
+      let opacity = 0.7;
+      if (isFirst) { markerColor = "#10b981"; markerSize = 12; opacity = 1; }       // DEP (green)
+      else if (isLast) { markerColor = "#f59e0b"; markerSize = 12; opacity = 1; }    // ARR (amber)
+      else if (isCurrent) { markerColor = "#06b6d4"; markerSize = 10; opacity = 1; } // current (cyan)
+      else if (isPassed) { opacity = 0.35; }                                         // passed (dimmed)
+
+      const label = isFirst ? "DEP" : isLast ? "ARR" : `${idx}`;
       const markerHtml = `
         <div class="relative flex items-center justify-center">
-          <span class="absolute w-4 h-4 rounded-full flex items-center justify-center" style="background: ${markerColor}; border: 2px solid white; box-shadow: 0 0 8px ${markerColor};"></span>
-          <span class="absolute -bottom-5 bg-zinc-950/90 border border-zinc-800 text-[9px] font-mono font-bold leading-none px-1.5 py-0.5 rounded text-zinc-100 whitespace-nowrap shadow-md">
-            ${label}: ${wp.name}
+          <span style="width:${markerSize}px;height:${markerSize}px;border-radius:50%;background:${markerColor};border:2px solid white;box-shadow:0 0 6px ${markerColor};opacity:${opacity};display:inline-block;"></span>
+          <span class="absolute -bottom-4 bg-zinc-950/90 border border-zinc-800 text-[8px] font-mono font-bold leading-none px-1 py-0.5 rounded text-zinc-100 whitespace-nowrap shadow-md" style="opacity:${opacity};">
+            ${label}
           </span>
         </div>
       `;
@@ -506,18 +695,18 @@ export default function App() {
       const customIcon = L.divIcon({
         html: markerHtml,
         className: "custom-wp-marker",
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
+        iconSize: [markerSize + 4, markerSize + 16],
+        iconAnchor: [(markerSize + 4) / 2, (markerSize + 4) / 2],
       });
 
       const markerInstance = L.marker([wp.latitude, wp.longitude], { icon: customIcon })
         .addTo(map)
         .bindPopup(`
           <div class="text-xs space-y-1">
-            <h4 class="font-bold border-b border-zinc-800 pb-1 text-zinc-200">${wp.name} ${wp.icao ? `(${wp.icao})` : ""}</h4>
+            <h4 class="font-bold border-b border-zinc-800 pb-1 text-zinc-200">${wp.name}</h4>
             <p class="text-zinc-400">Position: ${wp.latitude.toFixed(5)}, ${wp.longitude.toFixed(5)}</p>
             ${wp.elevationFeet ? `<p class="text-zinc-400">Alt: ${wp.elevationFeet} FT</p>` : ""}
-            <p class="text-zinc-500 font-mono text-[10px]">${isFirst ? "Departure" : "Destination"}</p>
+            <p class="text-zinc-500 font-mono text-[10px]">${isFirst ? "Departure" : isLast ? "Destination" : isCurrent ? "◀ Active" : isPassed ? "Passed" : "Waypoint " + idx}</p>
           </div>
         `);
 
@@ -661,8 +850,21 @@ export default function App() {
       const distToFirst = haversine(latitude, longitude, first.latitude, first.longitude);
       const distToLast = haversine(latitude, longitude, last.latitude, last.longitude);
 
-      const orderedWaypoints = distToLast < distToFirst ? [...waypoints].reverse() : waypoints;
-      const routeCoords = orderedWaypoints.map(wp => [wp.latitude, wp.longitude] as [number, number]);
+      // Draw the path in the original waypoint order (don't reverse)
+      const drawWps = waypoints;
+      const routeCoords: [number, number][] = [];
+      for (let i = 0; i < drawWps.length - 1; i++) {
+        const from = drawWps[i];
+        const to = drawWps[i + 1];
+        const numSegs = 10;
+        for (let j = 0; j <= numSegs; j++) {
+          const f = j / numSegs;
+          const lat = from.latitude + (to.latitude - from.latitude) * f;
+          const lng = from.longitude + (to.longitude - from.longitude) * f;
+          if (j === 0 && i > 0) continue;
+          routeCoords.push([lat, lng]);
+        }
+      }
       currentPolyline = L.polyline(routeCoords, { color: "#f59e0b", weight: 4, opacity: 0.9 }).addTo(map);
     }
 
@@ -673,6 +875,21 @@ export default function App() {
       }
     };
   }, [telemetry, mapLock, waypoints, activeWaypointIdx]);
+
+  // Debug overlay state
+  const [debugInfo, setDebugInfo] = useState({ heading: 0, rotationDeg: 0, lat: 0, lng: 0 });
+
+  // Update debug info whenever telemetry changes
+  useEffect(() => {
+    if (telemetry) {
+      setDebugInfo({
+        heading: telemetry.heading,
+        rotationDeg: rotationRef.current,
+        lat: telemetry.latitude,
+        lng: telemetry.longitude,
+      });
+    }
+  }, [telemetry]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden font-sans" id="msfs_main_viewport">
@@ -731,6 +948,10 @@ export default function App() {
                 activeWaypoint={waypoints[activeWaypointIdx] || null}
                 distanceToActiveWaypoint={distanceToActive}
                 bearingToActiveWaypoint={bearingToActive}
+                debugMode={debugMode}
+                onToggleDebug={handleToggleDebugMode}
+                waypoints={waypoints}
+                activeWaypointIdx={activeWaypointIdx}
               />
             )}
             {activeTab === "plan" && (

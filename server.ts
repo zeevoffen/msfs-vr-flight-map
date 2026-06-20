@@ -38,7 +38,7 @@ let sseClients: express.Response[] = [];
 // Bridge process management
 let bridgeProcess: ChildProcess | null = null;
 let bridgeLogBuffer: string[] = [];
-const MAX_LOG_LINES = 500;
+const MAX_LOG_LINES = 200;
 let bridgeLogClients: express.Response[] = [];
 
 function broadcastBridgeLog(line: string) {

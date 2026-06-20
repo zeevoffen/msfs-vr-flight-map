@@ -13,6 +13,7 @@ export default function BridgeLauncher() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
   const [pythonPath, setPythonPath] = useState<string>("");
+  const [showStderr, setShowStderr] = useState<boolean>(true);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logSourceRef = useRef<EventSource | null>(null);
 
@@ -29,12 +30,12 @@ export default function BridgeLauncher() {
       try {
         const payload = JSON.parse(event.data);
         if (Array.isArray(payload?.lines)) {
-          setBridgeLogs((prev) => [...prev, ...payload.lines].slice(-200));
+          setBridgeLogs((prev) => [...prev, ...payload.lines].slice(-100));
         } else if (payload?.line) {
-          setBridgeLogs((prev) => [...prev, payload.line].slice(-200));
+          setBridgeLogs((prev) => [...prev, payload.line].slice(-100));
         }
       } catch (err) {
-        setBridgeLogs((prev) => [...prev, String(event.data)].slice(-200));
+        setBridgeLogs((prev) => [...prev, String(event.data)].slice(-100));
       } finally {
         setLogsCleared(false);
       }
@@ -126,7 +127,7 @@ export default function BridgeLauncher() {
 
   useEffect(() => {
     if (!logsCleared && serverStatus.logLines.length > 0 && bridgeLogs.length === 0) {
-      setBridgeLogs(serverStatus.logLines.slice(-200));
+      setBridgeLogs(serverStatus.logLines.slice(-100));
     }
     if (serverStatus.running) {
       setBridgeStopRequested(false);
@@ -454,7 +455,17 @@ export default function BridgeLauncher() {
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Bridge Logs</h4>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-zinc-500">{bridgeLogs.length} lines</span>
+              <button
+                onClick={() => setShowStderr(!showStderr)}
+                className={`text-[10px] px-2 py-1 rounded font-mono transition-colors cursor-pointer ${
+                  showStderr
+                    ? "bg-red-900/40 border border-red-800/40 text-red-400 hover:bg-red-900/60"
+                    : "bg-zinc-800 border border-zinc-700 text-zinc-500 hover:bg-zinc-700"
+                }`}
+              >
+                {showStderr ? "STDERR ON" : "STDERR OFF"}
+              </button>
+              <span className="text-[10px] text-zinc-500">{bridgeLogs.filter(l => showStderr || !l.startsWith("[STDERR]")).length}/{bridgeLogs.length}</span>
               <button
                 onClick={handleClearLogs}
                 disabled={bridgeLogs.length === 0}
@@ -464,16 +475,40 @@ export default function BridgeLauncher() {
               </button>
             </div>
           </div>
-          <div className="h-40 overflow-y-auto rounded bg-zinc-950 p-3 font-mono text-[11px] leading-5 text-zinc-300">
+          <div className="h-40 overflow-y-auto rounded bg-zinc-950 p-3 font-mono text-[11px] leading-5">
             {bridgeLogs.length === 0 ? (
               <div className="text-zinc-500">Waiting for logs from the bridge...</div>
-            ) : (
-              bridgeLogs.map((line, index) => (
-                <div key={`${line}-${index}`} className="whitespace-pre-wrap break-words pb-0.5">
-                  {line}
-                </div>
-              ))
-            )}
+            ) : (() => {
+              // Filter lines based on stderr toggle
+              const filtered = bridgeLogs.filter((line) => showStderr || !line.startsWith("[STDERR]"));
+              // Deduplicate consecutive identical lines
+              const collapsed: { line: string; count: number }[] = [];
+              for (const line of filtered) {
+                const last = collapsed[collapsed.length - 1];
+                if (last && last.line === line) {
+                  last.count++;
+                } else {
+                  collapsed.push({ line, count: 1 });
+                }
+              }
+              return collapsed.map(({ line, count }, index) => {
+                const isStderr = line.startsWith("[STDERR]");
+                const isSystem = line.startsWith("[SYSTEM]");
+                const isStdout = line.startsWith("[STDOUT]");
+                let colorClass = "text-zinc-300";
+                if (isStderr) colorClass = "text-red-400";
+                else if (isSystem) colorClass = "text-amber-400";
+                else if (isStdout) colorClass = "text-emerald-400";
+                return (
+                  <div key={`log-${index}`} className={`whitespace-pre-wrap break-words pb-0.5 ${colorClass}`}>
+                    {line}
+                    {count > 1 && (
+                      <span className="ml-2 text-zinc-600 text-[9px]">×{count}</span>
+                    )}
+                  </div>
+                );
+              });
+            })()}
           </div>
         </div>
       </div>

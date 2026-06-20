@@ -1,12 +1,16 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Telemetry, Waypoint } from "../types";
-import { Navigation, Wind, Compass, ShieldAlert, CheckCircle, Activity, Gauge, Plane } from "lucide-react";
+import { Navigation, Wind, Compass, ShieldAlert, CheckCircle, Activity, Gauge, Plane, MapPin } from "lucide-react";
 
 interface HUDProps {
   telemetry: Telemetry | null;
   activeWaypoint: Waypoint | null;
   distanceToActiveWaypoint: number | null; // Nautical Miles (NM)
   bearingToActiveWaypoint: number | null; // Degrees
+  debugMode?: boolean;
+  onToggleDebug?: () => void;
+  waypoints?: Waypoint[];
+  activeWaypointIdx?: number;
 }
 
 export default function FlightDeckHUD({
@@ -14,6 +18,10 @@ export default function FlightDeckHUD({
   activeWaypoint,
   distanceToActiveWaypoint,
   bearingToActiveWaypoint,
+  debugMode = false,
+  onToggleDebug,
+  waypoints = [],
+  activeWaypointIdx = 0,
 }: HUDProps) {
   // If no live telemetry, show standby mode
   const isLive = telemetry && telemetry.isConnected;
@@ -30,6 +38,57 @@ export default function FlightDeckHUD({
   const onGround = telemetry?.onGround ?? true;
   const windDir = telemetry?.windDir || 0;
   const windSpd = telemetry?.windSpeed || 0;
+
+  // Reverse geocode current position to get place name
+  const [locationName, setLocationName] = useState<string | null>(null);
+  const geoCacheRef = useRef<Record<string, string>>({});
+  const fetchingRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!telemetry?.latitude || !telemetry?.longitude) {
+      setLocationName(null);
+      return;
+    }
+    // Round to ~11km grid to avoid spamming API
+    const lat = Math.round(telemetry.latitude * 10) / 10;
+    const lng = Math.round(telemetry.longitude * 10) / 10;
+    const cacheKey = `${lat},${lng}`;
+    // Check in-memory cache
+    if (geoCacheRef.current[cacheKey]) {
+      setLocationName(geoCacheRef.current[cacheKey]);
+      return;
+    }
+    // Don't fire duplicate in-flight requests
+    if (fetchingRef.current.has(cacheKey)) return;
+    fetchingRef.current.add(cacheKey);
+    let cancelled = false;
+    console.log(`[GEO] Fetching for ${cacheKey}`);
+    fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
+    )
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const parts = [
+          data.city || data.locality || data.principalSubdivision,
+          data.principalSubdivision,
+          data.countryName,
+        ].filter(Boolean);
+        const unique = [...new Set(parts)];
+        const name = unique.length > 0 ? unique.join(", ") : "Over water / remote area";
+        geoCacheRef.current[cacheKey] = name;
+        setLocationName(name);
+      })
+      .catch(() => {
+        if (!cancelled) setLocationName("Over water / remote area");
+      })
+      .finally(() => {
+        fetchingRef.current.delete(cacheKey);
+      });
+    return () => { cancelled = true; };
+  }, [telemetry?.latitude, telemetry?.longitude]);
 
   // Render a compass tape/strip based on current heading
   const getVisibleCompassTicks = () => {
@@ -59,18 +118,34 @@ export default function FlightDeckHUD({
           <Activity className={`w-4 h-4 ${isLive ? "text-emerald-500 animate-pulse" : "text-zinc-500"}`} />
           <span className="font-display font-bold text-sm tracking-wide">COCKPIT DATA LINK</span>
         </div>
-        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-zinc-800 rounded text-[11px] font-semibold">
-          {isLive ? (
-            <span className="text-emerald-400 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-              LIVE SIM
-            </span>
-          ) : (
-            <span className="text-zinc-400 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block animate-pulse"></span>
-              STANDBY / DEMO
-            </span>
+        <div className="flex items-center gap-2">
+          {/* Debug / Sim Mode Toggle */}
+          {onToggleDebug && (
+            <button
+              onClick={onToggleDebug}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                debugMode
+                  ? "bg-amber-500/20 border border-amber-500/40 text-amber-400 hover:bg-amber-500/30"
+                  : "bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/30"
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full inline-block ${debugMode ? "bg-amber-500 animate-pulse" : "bg-emerald-500"}`}></span>
+              {debugMode ? "Debug" : "Sim"}
+            </button>
           )}
+          <div className="flex items-center gap-1.5 px-2 py-0.5 bg-zinc-800 rounded text-[11px] font-semibold">
+            {isLive && !debugMode ? (
+              <span className="text-emerald-400 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                LIVE SIM
+              </span>
+            ) : (
+              <span className={`${debugMode ? "text-amber-400" : "text-zinc-400"} flex items-center gap-1`}>
+                <span className={`w-1.5 h-1.5 rounded-full inline-block animate-pulse ${debugMode ? "bg-amber-500" : "bg-zinc-500"}`}></span>
+                {debugMode ? "DEBUG DEMO" : "STANDBY"}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -270,6 +345,113 @@ export default function FlightDeckHUD({
               No active waypoint or flight plan loaded.
             </div>
           )}
+        </div>
+
+        {/* Flight Plan / Waypoint List */}
+        {waypoints.length > 0 && (
+          <div className="bg-black/20 border border-zinc-800 rounded-xl p-3 space-y-1.5">
+            <div className="flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-1">
+              <span>Flight Plan</span>
+              <span className="text-zinc-600">{waypoints.length} waypoints</span>
+            </div>
+            <div className="space-y-0.5 max-h-32 overflow-y-auto">
+              {waypoints.map((wp, idx) => {
+                const isPassed = idx < activeWaypointIdx;
+                const isCurrent = idx === activeWaypointIdx;
+                const isLast = idx === waypoints.length - 1;
+                let rowClass = "text-zinc-500";
+                let icon = "○";
+                if (isPassed) { rowClass = "text-zinc-600 line-through"; icon = "✓"; }
+                else if (isCurrent) { rowClass = "text-cyan-400 font-bold"; icon = "▶"; }
+                else if (isLast) { rowClass = "text-amber-400"; icon = "◆"; }
+                return (
+                  <div key={wp.id || idx} className={`flex items-center gap-2 text-[11px] font-mono ${rowClass}`}>
+                    <span className="w-3 text-center shrink-0">{icon}</span>
+                    <span className="truncate flex-1">{wp.name}</span>
+                    {wp.type === "Airport" && (
+                      <span className="text-[8px] bg-zinc-800 px-1 rounded text-zinc-500 shrink-0">AIRPT</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Debug Heading Verification Panel */}
+        {telemetry?.aircraftType?.startsWith("Debug") && (
+          <div className="bg-cyan-950/30 border border-cyan-500/30 rounded-xl p-3 space-y-2">
+            <div className="text-[10px] text-cyan-400 font-extrabold uppercase tracking-widest border-b border-cyan-500/20 pb-1 flex items-center gap-1.5">
+              <Compass className="w-3 h-3" />
+              Heading Debug
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+              <div>
+                <span className="text-zinc-500">Heading: </span>
+                <span className="text-cyan-300 font-bold">{telemetry.heading.toFixed(1)}°</span>
+              </div>
+              <div>
+                <span className="text-zinc-500">Lat: </span>
+                <span className="text-zinc-300">{telemetry.latitude.toFixed(4)}</span>
+              </div>
+              <div>
+                <span className="text-zinc-500">Rotation: </span>
+                <span className="text-cyan-300 font-bold">{telemetry.heading.toFixed(1)}°</span>
+              </div>
+              <div>
+                <span className="text-zinc-500">Lng: </span>
+                <span className="text-zinc-300">{telemetry.longitude.toFixed(4)}</span>
+              </div>
+            </div>
+            {/* Mini compass */}
+            <div className="flex items-center justify-center pt-1">
+              <div className="relative w-14 h-14">
+                <svg viewBox="0 0 100 100" className="w-full h-full">
+                  <circle cx="50" cy="50" r="45" fill="none" stroke="#333" strokeWidth="2"/>
+                  <text x="50" y="12" textAnchor="middle" fill="#999" fontSize="10">N</text>
+                  <text x="90" y="54" textAnchor="middle" fill="#666" fontSize="8">E</text>
+                  <text x="50" y="96" textAnchor="middle" fill="#666" fontSize="8">S</text>
+                  <text x="10" y="54" textAnchor="middle" fill="#666" fontSize="8">W</text>
+                  <line
+                    x1="50" y1="50"
+                    x2={50 + 35 * Math.sin(telemetry.heading * Math.PI / 180)}
+                    y2={50 - 35 * Math.cos(telemetry.heading * Math.PI / 180)}
+                    stroke="#06b6d4" strokeWidth="2" strokeLinecap="round"
+                  />
+                  <circle cx="50" cy="50" r="3" fill="#06b6d4"/>
+                </svg>
+              </div>
+            </div>
+            <div className="text-[9px] text-zinc-500 text-center pt-1 border-t border-zinc-800">
+              Arrow should point in direction of travel
+            </div>
+          </div>
+        )}
+
+        {/* Current Location / Place Name */}
+        <div className="bg-black/20 border border-zinc-800 rounded-xl p-3 space-y-1.5">
+          <div className="flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+            <span>Current Position</span>
+            <MapPin className="w-3.5 h-3.5 text-amber-400" />
+          </div>
+          <div className="text-xs font-mono text-zinc-300">
+            {telemetry?.latitude && telemetry?.longitude ? (
+              <>
+                <div className="text-[10px] text-zinc-500 mb-0.5">
+                  {telemetry.latitude.toFixed(4)}°N, {Math.abs(telemetry.longitude).toFixed(4)}°{telemetry.longitude >= 0 ? "E" : "W"}
+                </div>
+                <div className="text-sm font-semibold text-amber-400 tracking-wide min-h-[18px]">
+                  {locationName ? (
+                    locationName
+                  ) : (
+                    <span className="text-zinc-500 animate-pulse">Locating…</span>
+                  )}
+                </div>
+              </>
+            ) : (
+              <span className="text-zinc-500">No position data</span>
+            )}
+          </div>
         </div>
 
         {/* Wind Vector Panel */}
